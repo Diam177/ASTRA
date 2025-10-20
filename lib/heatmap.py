@@ -296,7 +296,7 @@ def build_heatmap(
     zmin: float = 0.0,
     zmax: float = 400.0,
     title: Optional[str] = None,
-    overlay_mode: str = "path",   # {"path","line"}
+    overlay_mode: str = "candles",   # {"candles","path","line"}
 ) -> go.Figure:
     """
     Build a Viridis heatmap of level strength with optional price overlay.
@@ -315,7 +315,7 @@ def build_heatmap(
     scores = lv[score_col].to_numpy(dtype=float)
     scores = np.clip(scores, zmin, zmax)
 
-    if price_series is not None and overlay_mode == "path":
+    if price_series is not None and overlay_mode in ("path","candles"):
         ps = price_series.copy()
         if not {"timestamp", "price"}.issubset(ps.columns):
             raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
@@ -332,12 +332,7 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
-            go.Scatter(
-                x=x, y=ps["price"].to_numpy(dtype=float),
-                mode="lines",
-                name="Price",
-                line=dict(width=2)
-            ),
+            *( [go.Scatter(x=x, y=ps["price"].to_numpy(dtype=float), mode="lines", name="Price", line=dict(width=2))] if overlay_mode=="path" else []),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -373,7 +368,7 @@ def build_heatmap(
 
     # --- Overlay: minute Price candles and VWAP like in key_levels ---
     try:
-        if price_series is not None and len(fig.data) <= 1:
+        if price_series is not None and (overlay_mode=="candles" or len(fig.data) <= 1):
             pdf = price_series.copy()
             # Normalize time column
             if "time" not in pdf.columns:
@@ -469,7 +464,7 @@ def build_heatmap(
         # Expand to Z shape
         lab = lv2[label_col].astype(str).to_list()
         hover_y = [f"{p:.2f} | {t}" for p, t in zip(y_prices, lab)]
-        if price_series is not None and overlay_mode == "path":
+        if price_series is not None and overlay_mode in ("path","candles"):
             hover = np.tile(np.array(hover_y, dtype=object).reshape(-1, 1), (1, Z.shape[1]))
         else:
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
