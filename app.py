@@ -2,6 +2,19 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+# --- Heatmap debug stub (avoids NameError at import-time) ---
+if "_render_level_strength_heatmap" not in globals():
+    import streamlit as st, traceback  # local to avoid top-level deps if not used
+    def _render_level_strength_heatmap(*args, **kwargs):
+        try:
+            st.warning("Heatmap debug: helper not yet defined; using stub")
+            st.write({"args_types":[type(a).__name__ for a in args],
+                      "kwargs_keys": list(kwargs.keys())})
+            st.code("".join(traceback.format_stack(limit=6)))
+        except Exception:
+            pass
+
+
 import os
 import json
 import requests
@@ -177,7 +190,6 @@ def _st_hide_subheader(*args, **kwargs):
     return None
 from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
 from lib.key_levels import render_key_levels
-from lib.heatmap import compute_scores, build_heatmap
 
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
@@ -859,7 +871,6 @@ if raw_records:
                             st.markdown("### Key Levels")
 
                             render_key_levels(df_final=df_final_multi, ticker=ticker, g_flip=_gflip_m, price_df=_price_df_m, session_date=_session_date_str_m, toggle_key="key_levels_multi")
-                            _render_level_strength_heatmap(df_final_multi, _price_df_m, _gflip_m, S if 'S' in locals() else None)
 
                             # --- Advanced Analysis Block (Multi) — placed under Key Levels ---
                             try:
@@ -927,7 +938,6 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
-                                    _render_level_strength_heatmap(df_final, _price_df, _gflip_val, S if 'S' in locals() else None)
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
