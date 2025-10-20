@@ -8,7 +8,7 @@ import requests
 from typing import Any, Dict, List, Tuple
 
 import streamlit as st
-
+from lib.heatmap import build_heatmap, compute_scores, ScoreConfig, add_price_overlay, export_price_vwap, stretch_heatmap_to_price
 
 
 # Advanced metrics block
@@ -867,6 +867,45 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
+                                    # --- Heat Map (Single) ---
+                                    try:
+                                        import pandas as _pd
+                                        _df = df_final.copy()
+                                        # spot
+                                        if "S" in _df.columns:
+                                            _spot = float(_pd.to_numeric(_df["S"], errors="coerce").dropna().median())
+                                        else:
+                                            try:
+                                                _spot = float(_pd.to_numeric(_price_df.get("price", _price_df.get("close")), errors="coerce").dropna().iloc[-1])
+                                            except Exception:
+                                                _spot = None
+                                        _factors = {}
+                                        if "AG_1pct" in _df.columns: _factors["AG"] = _pd.to_numeric(_df["AG_1pct"], errors="coerce")
+                                        if "PZ" in _df.columns:      _factors["PZ"] = _pd.to_numeric(_df["PZ"], errors="coerce")
+                                        if {"put_oi","call_oi"}.issubset(_df.columns):
+                                            _factors["OI"] = _pd.to_numeric(_df["put_oi"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_oi"], errors="coerce").fillna(0)
+                                        if {"put_vol","call_vol"}.issubset(_df.columns):
+                                            _factors["VOL"] = _pd.to_numeric(_df["put_vol"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_vol"], errors="coerce").fillna(0)
+                                        if _factors and ("K" in _df.columns) and (_spot is not None):
+                                            _scores = compute_scores(level_prices=_pd.to_numeric(_df["K"], errors="coerce"), factors=_factors, spot=_spot)
+                                            _levels_df = _pd.DataFrame({ "price": _scores["price"], "score": _scores["score"] })
+                                            _levels_df["label"] = _scores.get("label", _levels_df["price"].round(2).astype(str))
+                                            _fig_hm = build_heatmap(_levels_df, price_col="price", score_col="score", label_col="label", title=f"Heat Map {ticker}")
+                                            _fig_hm = add_price_overlay(_fig_hm, _price_df)
+                                            _fig_hm = stretch_heatmap_to_price(_fig_hm, _price_df)
+                                            st.markdown("### Heat Map")
+                                            st.plotly_chart(_fig_hm, use_container_width=True)
+                                            try:
+                                                _out_path = export_price_vwap(_price_df, f"{ticker}_{_session_date_str}_candles_vwap.parquet")
+                                                with open(_out_path, "rb") as _f:
+                                                    st.download_button("Скачать свечи+VWAP", data=_f, file_name=f"{ticker}_{_session_date_str}_candles_vwap.parquet", use_container_width=True)
+                                            except Exception:
+                                                pass
+                                        else:
+                                            st.info("Недостаточно данных для Heat Map.")
+                                    except Exception as _e_hm:
+                                        st.warning("Heat Map: ошибка рендера")
+                                        st.exception(_e_hm)
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
