@@ -465,3 +465,4 @@ def stretch_heatmap_to_price(fig: go.Figure, price_df: pd.DataFrame) -> go.Figur
     except Exception:
         pass
     return fig
+
