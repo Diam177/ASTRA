@@ -19,7 +19,7 @@ except Exception:
 # --- Intraday price loader for Key Levels (Polygon v2 aggs 1-minute) ---
 def _load_session_price_df_for_key_levels(ticker: str, session_date_str: str, api_key: str, timeout: int = 30):
     import pandas as pd
-    import pytz
+    import pytz, requests
     t_raw = (ticker or '').strip()
     t = t_raw.upper()
     if t in {'SPX','NDX','VIX','RUT','DJX'} and not t_raw.startswith('I:'):
@@ -38,8 +38,8 @@ def _load_session_price_df_for_key_levels(ticker: str, session_date_str: str, ap
     res = js.get("results") or []
     if not res:
         return None
+
     tz = pytz.timezone("America/New_York")
-    # Build dataframe
     times   = [pd.to_datetime(x.get("t"), unit="ms", utc=True).tz_convert(tz) for x in res]
     price   = [x.get("c") for x in res]
     volume  = [x.get("v") for x in res]
@@ -53,7 +53,6 @@ def _load_session_price_df_for_key_levels(ticker: str, session_date_str: str, ap
         "price":  pd.to_numeric(price,  errors="coerce"),
         "volume": pd.to_numeric(volume, errors="coerce"),
     })
-    # Add OHLC columns (used by candlesticks)
     try:
         df["open"]  = pd.to_numeric(opens,  errors="coerce")
         df["high"]  = pd.to_numeric(highs,  errors="coerce")
@@ -61,114 +60,57 @@ def _load_session_price_df_for_key_levels(ticker: str, session_date_str: str, ap
         df["close"] = pd.to_numeric(closes, errors="coerce")
     except Exception:
         pass
-    
-    # --- VWAP logic with SPX proxy ---
-    # expose per-bar 'vw' for indices
+
+    # --- VWAP: только провайдерский per-bar 'vw' ---
     try:
         df["vw"] = pd.to_numeric(vwap_api, errors="coerce")
     except Exception:
-        pass
+        df["vw"] = pd.NA
 
-    total_vol = float(df["volume"].fillna(0.0).sum())
-    if "vw" in df.columns and df["vw"].notna().any() and total_vol == 0.0:
-        # index case: use Polygon per-bar 'vw' directly
-        df["vwap"] = df["vw"]
-    elif any(v is not None for v in vwap_api) and total_vol > 0.0:
-        vw = pd.Series(pd.to_numeric(vwap_api, errors="coerce"), index=df.index)
-        vol = df["volume"].fillna(0.0)
-        cum_vol = vol.cumsum().replace(0, pd.NA)
-        df["vwap"] = (vw * vol).cumsum() / cum_vol
-    else:
-        df["vwap"] = pd.NA
-
-    # SPY proxy only for SPX if vwap still NaN
+    # --- SPY proxy для SPX: поминутно масштабируем SPY VWAP к SPX ---
     t_up = (ticker or "").upper()
-    if t_up in {"SPX","^SPX","I:SPX"} and (df["vwap"].isna().all() or not df["vwap"].notna().any()):
+    if t_up in {"SPX","^SPX","I:SPX"}:
         try:
-            base = "https://api.polygon.io"
-            url_spy = (f"{base}/v2/aggs/ticker/SPY/range/1/minute/"
-                       f"{session_date_str}/{session_date_str}"
-                       f"?adjusted=true&sort=asc&limit=50000&apiKey={api_key}")
-            r2 = requests.get(url_spy, timeout=timeout)
+            url2 = f"{base}/v2/aggs/ticker/SPY/range/1/minute/{session_date_str}/{session_date_str}?adjusted=true&sort=asc&limit=50000"
+            r2 = requests.get(url2, headers=headers, timeout=timeout)
             r2.raise_for_status()
-            js2 = r2.json() or {}
+            js2 = r2.json()
             res2 = js2.get("results") or []
-            if res2:
-                import pandas as pd, numpy as np, pytz
-                tz = pytz.timezone("America/New_York")
-                spy_time = pd.to_datetime([x.get("t") for x in res2], unit="ms", utc=True).tz_convert(tz)
-                spy_df = pd.DataFrame({
-                    "time": spy_time,
-                    "spy_close": pd.Series(pd.to_numeric([x.get("c") for x in res2], errors="coerce")),
-                    "spy_vol":   pd.Series(pd.to_numeric([x.get("v") for x in res2], errors="coerce")).fillna(0.0),
-                    "spy_vw":    pd.Series(pd.to_numeric([x.get("vw") for x in res2], errors="coerce")),
-                }).sort_values("time")
-                # RTH filter
-                spy_df = spy_df.set_index("time").between_time("09:30", "16:00").reset_index()
-                px = spy_df["spy_vw"].where(spy_df["spy_vw"].notna(), spy_df["spy_close"])
-                cumv = spy_df["spy_vol"].cumsum().replace(0, pd.NA)
-                spy_df["spy_vwap"] = (px.mul(spy_df["spy_vol"])).cumsum() / cumv
-                spy_df["minute"] = spy_df["time"].dt.floor("min")
 
-                # SPX minutes in ET
-                df_et = df.copy()
-                try:
-                    df_et["time"] = df_et["time"].dt.tz_convert(tz)
-                except Exception:
-                    df_et["time"] = pd.to_datetime(df_et["time"], utc=True).dt.tz_convert(tz)
-                df_et["minute"] = df_et["time"].dt.floor("min")
+            spy_df = pd.DataFrame({
+                "time": [pd.to_datetime(x.get("t"), unit="ms", utc=True).tz_convert(tz) for x in res2],
+                "spy_close": pd.to_numeric([x.get("c") for x in res2], errors="coerce"),
+                "spy_vw":    pd.to_numeric([x.get("vw") for x in res2], errors="coerce"),
+            }).sort_values("time")
+            spy_df = spy_df.set_index("time").between_time("09:30","16:00").reset_index()
+            spy_df["minute"] = spy_df["time"].dt.floor("min")
 
-                merged = pd.merge(df_et[["minute","price"]].rename(columns={"price":"spx_price"}),
-                                  spy_df[["minute","spy_close"]], on="minute", how="inner").sort_values("minute")
-                if not merged.empty and merged["spy_close"].iloc[0] and merged["spx_price"].iloc[0]:
-                    alpha0 = float(merged["spx_price"].iloc[0]) / float(merged["spy_close"].iloc[0])
-                else:
-                    alpha0 = 10.0
+            df_et = df.copy()
+            df_et["minute"] = df_et["time"].dt.floor("min")
 
-                ratio_map = (merged.set_index("minute")["spx_price"] / merged.set_index("minute")["spy_close"]).dropna()
-                minutes = spy_df["minute"].drop_duplicates().sort_values().reset_index(drop=True)
-                alphas = []
-                last_alpha = alpha0
-                session_start = minutes.iloc[0] if len(minutes) else None
-                for m in minutes:
-                    w_start = m - pd.Timedelta(minutes=15)
-                    r_win = ratio_map[(ratio_map.index > w_start) & (ratio_map.index <= m)]
-                    if len(r_win) >= 5:
-                        q1, q99 = r_win.quantile(0.01), r_win.quantile(0.99)
-                        raw_alpha = r_win.clip(q1, q99).median()
-                    else:
-                        raw_alpha = last_alpha
-                    if session_start is not None and (m - session_start) <= pd.Timedelta(minutes=30):
-                        low = 0.98 * alpha0; high = 1.02 * alpha0
-                        raw_alpha = min(max(raw_alpha, low), high)
-                    delta = raw_alpha - last_alpha
-                    max_step = 0.005 * last_alpha
-                    if abs(delta) > abs(max_step):
-                        raw_alpha = last_alpha + (max_step if delta > 0 else -max_step)
-                    alphas.append(raw_alpha)
-                    last_alpha = raw_alpha
-                alpha_series = pd.Series(alphas, index=minutes, name="alpha")
+            merged = pd.merge(
+                df_et[["minute","price"]].rename(columns={"price":"spx_price"}),
+                spy_df[["minute","spy_close"]], on="minute", how="inner"
+            ).sort_values("minute")
 
-                alpha_aligned = pd.merge(df_et[["minute"]], alpha_series, left_on="minute", right_index=True, how="left")["alpha"].fillna(method="ffill")
-                spy_vwap_aligned = pd.merge(df_et[["minute"]], spy_df[["minute","spy_vwap"]], on="minute", how="left")["spy_vwap"].fillna(method="ffill")
-                proxy_vwap = alpha_aligned.values * spy_vwap_aligned.values
+            alpha0 = float(merged["spx_price"].iloc[0]) / float(merged["spy_close"].iloc[0]) if not merged.empty else 10.0
+            ratio_map = (merged.set_index("minute")["spx_price"] / merged.set_index("minute")["spy_close"]).dropna()
 
-                df["vwap"] = df["vwap"].where(df["vwap"].notna(), proxy_vwap)
-        except Exception as e:
-            try:
-                import streamlit as st
-                code = getattr(getattr(e, "response", None), "status_code", None)
-                st.warning(f"SPY proxy VWAP недоступен ({code}) {type(e).__name__}: {e}. Использую TWAP.", icon="⚠️")
-            except Exception:
-                pass
+            minutes = spy_df["minute"].drop_duplicates().sort_values().reset_index(drop=True)
+            alphas, last_alpha = [], alpha0
+            for m in minutes:
+                if m in ratio_map.index:
+                    last_alpha = float(ratio_map.loc[m])
+                alphas.append(last_alpha)
+            alpha_aligned = pd.Series(alphas, index=minutes)
+            spy_vwap_aligned = spy_df.set_index("minute")["spy_vw"].reindex(minutes).fillna(method="ffill")
+            proxy_vwap = alpha_aligned.values * spy_vwap_aligned.values
 
-    # Final fallback: TWAP
-    if df["vwap"].isna().all():
-        pr = df["price"].fillna(method="ffill")
-        df["vwap"] = pr.expanding().mean()
+            df["vw"] = pd.Series(proxy_vwap, index=minutes).reindex(df_et["minute"]).to_numpy()
+        except Exception:
+            pass
+
     return df
-
-# --- Helpers to hide tables from main page ---
 def _st_hide_df(*args, **kwargs):
     # no-op: we suppress table rendering on main page per requirements
     return None
@@ -177,7 +119,6 @@ def _st_hide_subheader(*args, **kwargs):
     return None
 from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
 from lib.key_levels import render_key_levels
-from lib.heatmap import build_heatmap, compute_scores, ScoreConfig, add_price_overlay, export_price_vwap
 
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
@@ -926,54 +867,6 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
-
-                                    # --- Heat Map (Single) ---
-                                    try:
-                                        # Build levels_df from final table
-                                        import pandas as _pd
-                                        _df = df_final.copy()
-                                        # Ensure required columns exist
-                                        if "K" in _df.columns and "S" in _df.columns:
-                                            _spot = float(_pd.to_numeric(_df["S"], errors="coerce").median())
-                                        elif 'S' in locals():
-                                            _spot = float(S)
-                                        else:
-                                            _spot = None
-                                        # Candidate factors present in df_final
-                                        _factors = {}
-                                        for _name, _col in [("AG", "AG_1pct"), ("PZ", "PZ"), ("OI", "call_oi"), ("VOL", "call_vol"), ("GFLIP", "gflip_flag")]:
-                                            if _col in _df.columns:
-                                                _factors[_name] = _pd.to_numeric(_df[_col], errors="coerce")
-                                        # Fallback for OI/VOL combined
-                                        if "put_oi" in _df.columns and "call_oi" in _df.columns:
-                                            _factors["OI"] = _pd.to_numeric(_df["put_oi"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_oi"], errors="coerce").fillna(0)
-                                        if "put_vol" in _df.columns and "call_vol" in _df.columns:
-                                            _factors["VOL"] = _pd.to_numeric(_df["put_vol"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_vol"], errors="coerce").fillna(0)
-                                        # Compute scores if possible
-                                        if _factors and ("K" in _df.columns) and (_spot is not None):
-                                            _scores = compute_scores(level_prices=_pd.to_numeric(_df["K"], errors="coerce"), factors=_factors, spot=_spot)
-                                            _levels_df = _pd.DataFrame({ "price": _scores["price"], "score": _scores["score"] })
-                                            _levels_df["label"] = _scores.get("label", _levels_df["price"].round(2).astype(str))
-                                            _fig_hm = build_heatmap(_levels_df, price_col="price", score_col="score", label_col="label", title=f"Heat Map {ticker}")
-                                            # Overlay candles + VWAP
-                                            try:
-                                                _fig_hm = add_price_overlay(_fig_hm, _price_df)
-                                            except Exception:
-                                                pass
-                                            st.markdown("### Heat Map")
-                                            st.plotly_chart(_fig_hm, use_container_width=True)
-                                            # Export minute candles + VWAP file
-                                            try:
-                                                _out_path = export_price_vwap(_price_df, f"{ticker}_{_session_date_str}_candles_vwap.parquet")
-                                                with open(_out_path, "rb") as _f:
-                                                    st.download_button("Скачать свечи+VWAP", data=_f, file_name=f"{ticker}_{_session_date_str}_candles_vwap.parquet", use_container_width=True)
-                                            except Exception as _ex_save:
-                                                st.warning(f"Не удалось подготовить файл свечей/VWAP: {type(_ex_save).__name__}")
-                                        else:
-                                            st.info("Недостаточно данных для Heat Map.")
-                                    except Exception as _hm_e:
-                                        st.warning("Heat Map: ошибка рендера")
-                                        st.exception(_hm_e)
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
