@@ -440,15 +440,13 @@ def build_heatmap(
                     name="Price",
                     showlegend=True,
                 ))
-            elif col_price is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
-                    mode="lines",
-                    line=dict(width=1.2),
-                    name="Price",
-                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
+            else:
+                # When OHLC data are not available, avoid plotting the raw price line.
+                # Previously, we would plot a line using the price column, but this has
+                # been removed to prevent drawing an additional red path over the
+                # heatmap. If synthetic OHLC columns are missing and no candlestick
+                # can be plotted, we simply skip adding a price trace.
+                pass
 
             # VWAP
             vwap_series = None
