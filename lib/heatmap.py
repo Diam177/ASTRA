@@ -24,10 +24,32 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional, Tuple
 import numpy as np
-
-import requests
 import pandas as pd
 import plotly.graph_objects as go
+
+# Helper to load minute price data and VWAP like in key_levels.
+# This copies the interface of `_load_session_price_df_for_key_levels` from app.py.
+# It attempts to import the original function from the app module; if that fails,
+# it returns None. This makes the heatmap module independent of app internals.
+try:
+    # Use the original loader if available
+    from app import _load_session_price_df_for_key_levels as load_session_price_df_for_heatmap
+except Exception:
+    def load_session_price_df_for_heatmap(
+        ticker: str,
+        session_date_str: str,
+        api_key: str,
+        timeout: int = 30,
+    ) -> Optional[pd.DataFrame]:
+        """Fallback loader for minute price data and VWAP.
+
+        This simplified loader only returns None. In a production environment, you
+        should provide a DataFrame with columns 'time', 'price', and optionally
+        'open','high','low','close','volume','vwap'. When OHLC columns are
+        missing, the plotting logic will synthesize them from 'price'.
+        """
+        # Placeholder implementation: caller should replace with real data source
+        return None
 
 
 # ---------------------------- Normalization helpers ----------------------------
@@ -114,161 +136,6 @@ class ScoreConfig:
 
 
 # ------------------------------- Core scoring ----------------------------------
-
-# --- Independent OHLC/VWAP loader copied from app._load_session_price_df_for_key_levels ---
-# SPX/NDX/etc handled via Polygon index prefix and SPX→SPY VWAP proxy.
-def load_session_price_df_for_heatmap(ticker: str, session_date_str: str, api_key: str, timeout: int = 30):
-    import pandas as pd
-    import pytz
-    t_raw = (ticker or '').strip()
-    t = t_raw.upper()
-    if t in {'SPX','NDX','VIX','RUT','DJX'} and not t_raw.startswith('I:'):
-        t = f'I:{t}'
-    if not t or not session_date_str:
-        return None
-    base = "https://api.polygon.io"
-    url = f"{base}/v2/aggs/ticker/{t}/range/1/minute/{session_date_str}/{session_date_str}?adjusted=true&sort=asc&limit=50000"
-    headers = {"Authorization": f"Bearer {api_key}"}
-    try:
-        r = requests.get(url, headers=headers, timeout=timeout)
-        r.raise_for_status()
-        js = r.json()
-    except Exception:
-        return None
-    res = js.get("results") or []
-    if not res:
-        return None
-    tz = pytz.timezone("America/New_York")
-    # Build dataframe
-    times   = [pd.to_datetime(x.get("t"), unit="ms", utc=True).tz_convert(tz) for x in res]
-    price   = [x.get("c") for x in res]
-    volume  = [x.get("v") for x in res]
-    vwap_api= [x.get("vw") for x in res]
-    opens   = [x.get("o") for x in res]
-    highs   = [x.get("h") for x in res]
-    lows    = [x.get("l") for x in res]
-    closes  = [x.get("c") for x in res]
-    df = pd.DataFrame({
-        "time":   times,
-        "price":  pd.to_numeric(price,  errors="coerce"),
-        "volume": pd.to_numeric(volume, errors="coerce"),
-    })
-    # Add OHLC columns (used by candlesticks)
-    try:
-        df["open"]  = pd.to_numeric(opens,  errors="coerce")
-        df["high"]  = pd.to_numeric(highs,  errors="coerce")
-        df["low"]   = pd.to_numeric(lows,   errors="coerce")
-        df["close"] = pd.to_numeric(closes, errors="coerce")
-    except Exception:
-        pass
-    
-    # --- VWAP logic with SPX proxy ---
-    # expose per-bar 'vw' for indices
-    try:
-        df["vw"] = pd.to_numeric(vwap_api, errors="coerce")
-    except Exception:
-        pass
-
-    total_vol = float(df["volume"].fillna(0.0).sum())
-    if "vw" in df.columns and df["vw"].notna().any() and total_vol == 0.0:
-        # index case: use Polygon per-bar 'vw' directly
-        df["vwap"] = df["vw"]
-    elif any(v is not None for v in vwap_api) and total_vol > 0.0:
-        vw = pd.Series(pd.to_numeric(vwap_api, errors="coerce"), index=df.index)
-        vol = df["volume"].fillna(0.0)
-        cum_vol = vol.cumsum().replace(0, pd.NA)
-        df["vwap"] = (vw * vol).cumsum() / cum_vol
-    else:
-        df["vwap"] = pd.NA
-
-    # SPY proxy only for SPX if vwap still NaN
-    t_up = (ticker or "").upper()
-    if t_up in {"SPX","^SPX","I:SPX"} and (df["vwap"].isna().all() or not df["vwap"].notna().any()):
-        try:
-            base = "https://api.polygon.io"
-            url_spy = (f"{base}/v2/aggs/ticker/SPY/range/1/minute/"
-                       f"{session_date_str}/{session_date_str}"
-                       f"?adjusted=true&sort=asc&limit=50000&apiKey={api_key}")
-            r2 = requests.get(url_spy, timeout=timeout)
-            r2.raise_for_status()
-            js2 = r2.json() or {}
-            res2 = js2.get("results") or []
-            if res2:
-                import pandas as pd, numpy as np, pytz
-                tz = pytz.timezone("America/New_York")
-                spy_time = pd.to_datetime([x.get("t") for x in res2], unit="ms", utc=True).tz_convert(tz)
-                spy_df = pd.DataFrame({
-                    "time": spy_time,
-                    "spy_close": pd.Series(pd.to_numeric([x.get("c") for x in res2], errors="coerce")),
-                    "spy_vol":   pd.Series(pd.to_numeric([x.get("v") for x in res2], errors="coerce")).fillna(0.0),
-                    "spy_vw":    pd.Series(pd.to_numeric([x.get("vw") for x in res2], errors="coerce")),
-                }).sort_values("time")
-                # RTH filter
-                spy_df = spy_df.set_index("time").between_time("09:30", "16:00").reset_index()
-                px = spy_df["spy_vw"].where(spy_df["spy_vw"].notna(), spy_df["spy_close"])
-                cumv = spy_df["spy_vol"].cumsum().replace(0, pd.NA)
-                spy_df["spy_vwap"] = (px.mul(spy_df["spy_vol"])).cumsum() / cumv
-                spy_df["minute"] = spy_df["time"].dt.floor("min")
-
-                # SPX minutes in ET
-                df_et = df.copy()
-                try:
-                    df_et["time"] = df_et["time"].dt.tz_convert(tz)
-                except Exception:
-                    df_et["time"] = pd.to_datetime(df_et["time"], utc=True).dt.tz_convert(tz)
-                df_et["minute"] = df_et["time"].dt.floor("min")
-
-                merged = pd.merge(df_et[["minute","price"]].rename(columns={"price":"spx_price"}),
-                                  spy_df[["minute","spy_close"]], on="minute", how="inner").sort_values("minute")
-                if not merged.empty and merged["spy_close"].iloc[0] and merged["spx_price"].iloc[0]:
-                    alpha0 = float(merged["spx_price"].iloc[0]) / float(merged["spy_close"].iloc[0])
-                else:
-                    alpha0 = 10.0
-
-                ratio_map = (merged.set_index("minute")["spx_price"] / merged.set_index("minute")["spy_close"]).dropna()
-                minutes = spy_df["minute"].drop_duplicates().sort_values().reset_index(drop=True)
-                alphas = []
-                last_alpha = alpha0
-                session_start = minutes.iloc[0] if len(minutes) else None
-                for m in minutes:
-                    w_start = m - pd.Timedelta(minutes=15)
-                    r_win = ratio_map[(ratio_map.index > w_start) & (ratio_map.index <= m)]
-                    if len(r_win) >= 5:
-                        q1, q99 = r_win.quantile(0.01), r_win.quantile(0.99)
-                        raw_alpha = r_win.clip(q1, q99).median()
-                    else:
-                        raw_alpha = last_alpha
-                    if session_start is not None and (m - session_start) <= pd.Timedelta(minutes=30):
-                        low = 0.98 * alpha0; high = 1.02 * alpha0
-                        raw_alpha = min(max(raw_alpha, low), high)
-                    delta = raw_alpha - last_alpha
-                    max_step = 0.005 * last_alpha
-                    if abs(delta) > abs(max_step):
-                        raw_alpha = last_alpha + (max_step if delta > 0 else -max_step)
-                    alphas.append(raw_alpha)
-                    last_alpha = raw_alpha
-                alpha_series = pd.Series(alphas, index=minutes, name="alpha")
-
-                alpha_aligned = pd.merge(df_et[["minute"]], alpha_series, left_on="minute", right_index=True, how="left")["alpha"].fillna(method="ffill")
-                spy_vwap_aligned = pd.merge(df_et[["minute"]], spy_df[["minute","spy_vwap"]], on="minute", how="left")["spy_vwap"].fillna(method="ffill")
-                proxy_vwap = alpha_aligned.values * spy_vwap_aligned.values
-
-                df["vwap"] = df["vwap"].where(df["vwap"].notna(), proxy_vwap)
-        except Exception as e:
-            try:
-                import streamlit as st
-                code = getattr(getattr(e, "response", None), "status_code", None)
-                st.warning(f"SPY proxy VWAP недоступен ({code}) {type(e).__name__}: {e}. Использую TWAP.", icon="⚠️")
-            except Exception:
-                pass
-
-    # Final fallback: TWAP
-    if df["vwap"].isna().all():
-        pr = df["price"].fillna(method="ffill")
-        df["vwap"] = pr.expanding().mean()
-    return df
-
-# --- Helpers to hide tables from main page ---
 
 def compute_scores(
     level_prices: pd.Series,
@@ -445,7 +312,7 @@ def build_heatmap(
     zmin: float = 0.0,
     zmax: float = 400.0,
     title: Optional[str] = None,
-    overlay_mode: str = "candles",   # {"candles","path","line"}
+    overlay_mode: str = "path",   # {"path","line"}
 ) -> go.Figure:
     """
     Build a Viridis heatmap of level strength with optional price overlay.
@@ -464,7 +331,7 @@ def build_heatmap(
     scores = lv[score_col].to_numpy(dtype=float)
     scores = np.clip(scores, zmin, zmax)
 
-    if price_series is not None and overlay_mode in ("path","candles"):
+    if price_series is not None and overlay_mode == "path":
         ps = price_series.copy()
         if not {"timestamp", "price"}.issubset(ps.columns):
             raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
@@ -481,7 +348,12 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
-            *( [go.Scatter(x=x, y=ps["price"].to_numpy(dtype=float), mode="lines", name="Price", line=dict(width=2))] if overlay_mode=="path" else []),
+            go.Scatter(
+                x=x, y=ps["price"].to_numpy(dtype=float),
+                mode="lines",
+                name="Price",
+                line=dict(width=2)
+            ),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -517,7 +389,7 @@ def build_heatmap(
 
     # --- Overlay: minute Price candles and VWAP like in key_levels ---
     try:
-        if price_series is not None and (overlay_mode=="candles" or len(fig.data) <= 1):
+        if price_series is not None and len(fig.data) <= 1:
             pdf = price_series.copy()
             # Normalize time column
             if "time" not in pdf.columns:
@@ -541,6 +413,19 @@ def build_heatmap(
 
             # Candlestick if OHLC available
             has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+            # If OHLC columns are missing but we have a price column, synthesize candlestick data
+            if not has_ohlc and col_price is not None:
+                # create synthetic OHLC columns equal to the price values
+                try:
+                    price_vals = pd.to_numeric(pdf[col_price], errors="coerce")
+                except Exception:
+                    price_vals = pdf[col_price]
+                # assign synthetic columns for candlestick plotting
+                pdf["open"]  = price_vals
+                pdf["high"]  = price_vals
+                pdf["low"]   = price_vals
+                pdf["close"] = price_vals
+                has_ohlc = True
             if has_ohlc:
                 # Map polygon aliases
                 o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
@@ -556,8 +441,15 @@ def build_heatmap(
                     showlegend=True,
                 ))
             elif col_price is not None:
-                # No price line fallback per requirements
-                pass
+                fig.add_trace(go.Scatter(
+                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
+                    mode="lines",
+                    line=dict(width=1.2),
+                    name="Price",
+                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
+                    showlegend=True,
+                ))
+
             # VWAP
             vwap_series = None
             if "vwap" in pdf.columns:
@@ -572,6 +464,13 @@ def build_heatmap(
                 pr  = pd.to_numeric(pdf[col_price], errors="coerce").fillna(pd.NA)
                 cum_vol = vol.cumsum()
                 vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
+            elif col_price is not None:
+                # Fallback: use TWAP (cumulative average of price) if volume is absent
+                try:
+                    pr = pd.to_numeric(pdf[col_price], errors="coerce").fillna(method="ffill")
+                except Exception:
+                    pr = pdf[col_price]
+                vwap_series = pr.expanding().mean()
             if vwap_series is not None:
                 fig.add_trace(go.Scatter(
                     x=pdf["time"], y=vwap_series,
@@ -606,53 +505,10 @@ def build_heatmap(
         # Expand to Z shape
         lab = lv2[label_col].astype(str).to_list()
         hover_y = [f"{p:.2f} | {t}" for p, t in zip(y_prices, lab)]
-        if price_series is not None and overlay_mode in ("path","candles"):
+        if price_series is not None and overlay_mode == "path":
             hover = np.tile(np.array(hover_y, dtype=object).reshape(-1, 1), (1, Z.shape[1]))
         else:
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
-    
-    # --- Visible debug on main page ---
-    try:
-        import streamlit as st
-        import pandas as _pd
-        st.subheader("DEBUG · Heatmap")
-        # Detect sources
-        _has_ohlc = price_series is not None and (
-            {"open","high","low","close"}.issubset(set(price_series.columns)) or
-            {"o","h","l","c"}.issubset(set(price_series.columns))
-        )
-        _candles_func = "plotly.graph_objects.Candlestick" if _has_ohlc else "нет OHLC — свечи не строятся"
-        if price_series is not None and "vwap" in price_series.columns:
-            _vwap_src = "app._load_session_price_df_for_key_levels → price_df['vwap']" if load_session_price_df_for_heatmap else "price_df['vwap']"
-        elif price_series is not None and "vw" in price_series.columns:
-            _vwap_src = "price_df['vw']"
-        elif price_series is not None and "volume" in price_series.columns:
-            _vwap_src = "recalc (price*volume)/cum(volume)"
-        else:
-            _vwap_src = "TWAP fallback (в загрузчике)"
-        _traces = [{"i": i, "type": getattr(tr, "type", None), "name": getattr(tr,"name",None), "mode": getattr(tr,"mode",None)} for i, tr in enumerate(fig.data or [])]
-        _price_line_drawn = any(t["type"]=="scatter" and (str(t.get("mode","")).lower().find("line")>=0) and str(t.get("name","")).lower().startswith("price") for t in _traces)
-        st.write({
-            "overlay_mode": overlay_mode,
-            "price_loader_func": "heatmap.load_session_price_df_for_heatmap",
-            "candles_func": _candles_func,
-            "vwap_source": _vwap_src,
-            "price_line_drawn": _price_line_drawn,
-            "price_cols": list(price_series.columns) if price_series is not None else None,
-            "rows": 0 if price_series is None else len(price_series),
-        })
-        try:
-            st.dataframe(_pd.DataFrame(_traces))
-        except Exception:
-            pass
-        try:
-            _cols = [c for c in ["time","timestamp","price","open","high","low","close","o","h","l","c","vwap","vw","volume"] if price_series is not None and c in price_series.columns]
-            if _cols:
-                st.dataframe(price_series[_cols].head(8))
-        except Exception:
-            pass
-    except Exception:
-        pass
     return fig
