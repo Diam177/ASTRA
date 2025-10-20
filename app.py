@@ -927,6 +927,7 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
+                                    _render_level_strength_heatmap(df_final, _price_df, _gflip_val, S if 'S' in locals() else None)
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
