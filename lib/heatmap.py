@@ -8,9 +8,7 @@ API:
 - compute_scores(level_prices, factors, *, spot, flip_side=None, weights=None,
                  type_map=None, norm="p90", lambda_types=0.2, tau=0.015,
                  side_gain=0.15, cap_percentile=95) -> pandas.DataFrame
-- build_heatmap(levels_df, price_series=None, *, price_col="price",
-                score_col="score", label_col=None, zmin=0, zmax=400,
-                title=None, overlay_mode="path") -> plotly.graph_objects.Figure
+- build_heatmap(levels_df, *, price_col="price", score_col="score", label_col=None, zmin=0, zmax=400, title=None) -> plotly.graph_objects.Figure
 
 Notes:
 - No history used. All normalizations are within the current snapshot/session.
@@ -26,30 +24,6 @@ from typing import Dict, Iterable, Optional, Tuple
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-
-# Helper to load minute price data and VWAP like in key_levels.
-# This copies the interface of `_load_session_price_df_for_key_levels` from app.py.
-# It attempts to import the original function from the app module; if that fails,
-# it returns None. This makes the heatmap module independent of app internals.
-try:
-    # Use the original loader if available
-    from app import _load_session_price_df_for_key_levels as load_session_price_df_for_heatmap
-except Exception:
-    def load_session_price_df_for_heatmap(
-        ticker: str,
-        session_date_str: str,
-        api_key: str,
-        timeout: int = 30,
-    ) -> Optional[pd.DataFrame]:
-        """Fallback loader for minute price data and VWAP.
-
-        This simplified loader only returns None. In a production environment, you
-        should provide a DataFrame with columns 'time', 'price', and optionally
-        'open','high','low','close','volume','vwap'. When OHLC columns are
-        missing, the plotting logic will synthesize them from 'price'.
-        """
-        # Placeholder implementation: caller should replace with real data source
-        return None
 
 
 # ---------------------------- Normalization helpers ----------------------------
@@ -315,171 +289,42 @@ def build_heatmap(
     overlay_mode: str = "path",   # {"path","line"}
 ) -> go.Figure:
     """
-    Build a Viridis heatmap of level strength with optional price overlay.
-
-    levels_df must contain columns: price_col, score_col; optionally label_col.
-    price_series, if provided, must contain ["timestamp","price"]. When given and
-    overlay_mode="path", the heatmap is tiled across time to align a price path.
+    Build a Viridis heatmap of level strength.
+levels_df must contain columns: price_col, score_col; optionally label_col.
     """
     if price_col not in levels_df or score_col not in levels_df:
         raise ValueError(f"levels_df must have '{price_col}' and '{score_col}' columns")
 
-    # Prepare axes
+        # Prepare axes
     lv = levels_df[[price_col, score_col]].dropna().copy()
     lv = lv.sort_values(price_col)
     y_prices = lv[price_col].to_numpy(dtype=float)
     scores = lv[score_col].to_numpy(dtype=float)
     scores = np.clip(scores, zmin, zmax)
 
-    if price_series is not None and overlay_mode == "path":
-        ps = price_series.copy()
-        if not {"timestamp", "price"}.issubset(ps.columns):
-            raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-        ps = ps.sort_values("timestamp")
-        x = pd.to_datetime(ps["timestamp"])
-        # Tile heatmap across time for alignment
-        Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
-        fig = go.Figure(data=[
-            go.Heatmap(
-                z=Z,
-                x=x,
-                y=y_prices,
-                colorscale="Viridis",
-                zmin=zmin, zmax=zmax,
-                colorbar=dict(title="Level strength", ticksuffix="")
-            ),
-            go.Scatter(
-                x=x, y=ps["price"].to_numpy(dtype=float),
-                mode="lines",
-                name="Price",
-                line=dict(width=2)
-            ),
-        ])
-        fig.update_layout(
-            title=title or "Level Strength Heatmap",
-            xaxis_title="Time",
-            yaxis_title="Price",
-            template="plotly_white",
-            height=800,
+    # Single-column heatmap
+    Z = scores.reshape(-1, 1)
+    fig = go.Figure(data=[
+        go.Heatmap(
+            z=Z,
+            x=["strength"],
+            y=y_prices,
+            colorscale="Viridis",
+            zmin=zmin, zmax=zmax,
+            colorbar=dict(title="Level strength", ticksuffix="")
         )
-    else:
-        # Single-column heatmap with optional horizontal price line
-        Z = scores.reshape(-1, 1)
-        fig = go.Figure(data=[
-            go.Heatmap(
-                z=Z,
-                x=["strength"],
-                y=y_prices,
-                colorscale="Viridis",
-                zmin=zmin, zmax=zmax,
-                colorbar=dict(title="Level strength", ticksuffix="")
-            )
-        ])
-        fig.update_layout(
-            title=title or "Level Strength Heatmap",
-            xaxis_title="",
-            yaxis_title="Price",
-            template="plotly_white",
-            height=800,
-            xaxis=dict(showticklabels=False)
-        )
-        if price_series is not None and "price" in price_series:
-            last_price = float(price_series["price"].iloc[-1])
-            fig.add_hline(y=last_price, line=dict(width=2), annotation_text="Spot")
+    ])
+    fig.update_layout(
+        title=title or "Level Strength Heatmap",
+        xaxis_title="",
+        yaxis_title="Price",
+        template="plotly_white",
+        height=800,
+        xaxis=dict(showticklabels=False)
+    )
 
-    # --- Overlay: minute Price candles and VWAP like in key_levels ---
+    # Left y-axis ticks at all levels with nonzero factors if present
     try:
-        if price_series is not None and len(fig.data) <= 1:
-            pdf = price_series.copy()
-            # Normalize time column
-            if "time" not in pdf.columns:
-                if "timestamp" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
-                elif "t" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
-            # If still no time column but index looks like datetime, use it
-            if "time" not in pdf.columns and isinstance(pdf.index, pd.DatetimeIndex):
-                pdf = pdf.reset_index().rename(columns={"index":"time"})
-            if "time" not in pdf.columns:
-                raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-            pdf = pdf.dropna(subset=["time"]).sort_values("time")
-
-            # Choose price columns
-            col_price = None
-            if "price" in pdf.columns:
-                col_price = "price"
-            elif "c" in pdf.columns:
-                col_price = "c"
-
-            # Candlestick if OHLC available
-            has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
-            # If OHLC columns are missing but we have a price column, synthesize candlestick data
-            if not has_ohlc and col_price is not None:
-                # create synthetic OHLC columns equal to the price values
-                try:
-                    price_vals = pd.to_numeric(pdf[col_price], errors="coerce")
-                except Exception:
-                    price_vals = pdf[col_price]
-                # assign synthetic columns for candlestick plotting
-                pdf["open"]  = price_vals
-                pdf["high"]  = price_vals
-                pdf["low"]   = price_vals
-                pdf["close"] = price_vals
-                has_ohlc = True
-            if has_ohlc:
-                # Map polygon aliases
-                o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
-                h = pdf["high"] if "high" in pdf.columns else pd.to_numeric(pdf["h"], errors="coerce")
-                l = pdf["low"]  if "low"  in pdf.columns else pd.to_numeric(pdf["l"], errors="coerce")
-                c = pdf["close"] if "close" in pdf.columns else pd.to_numeric(pdf["c"], errors="coerce")
-                fig.add_trace(go.Candlestick(
-                    x=pdf["time"], open=pd.to_numeric(o, errors="coerce"),
-                    high=pd.to_numeric(h, errors="coerce"),
-                    low=pd.to_numeric(l, errors="coerce"),
-                    close=pd.to_numeric(c, errors="coerce"),
-                    name="Price",
-                    showlegend=True,
-                ))
-            else:
-                # When OHLC data are not available, avoid plotting the raw price line.
-                # Previously, we would plot a line using the price column, but this has
-                # been removed to prevent drawing an additional red path over the
-                # heatmap. If synthetic OHLC columns are missing and no candlestick
-                # can be plotted, we simply skip adding a price trace.
-                pass
-
-            # VWAP
-            vwap_series = None
-            if "vwap" in pdf.columns:
-                vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
-            elif "vw" in pdf.columns:
-                try:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
-                except Exception:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
-            elif col_price is not None and "volume" in pdf.columns:
-                vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
-                pr  = pd.to_numeric(pdf[col_price], errors="coerce").fillna(pd.NA)
-                cum_vol = vol.cumsum()
-                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
-            elif col_price is not None:
-                # Fallback: use TWAP (cumulative average of price) if volume is absent
-                try:
-                    pr = pd.to_numeric(pdf[col_price], errors="coerce").fillna(method="ffill")
-                except Exception:
-                    pr = pdf[col_price]
-                vwap_series = pr.expanding().mean()
-            if vwap_series is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=vwap_series,
-                    mode="lines",
-                    line=dict(width=1.0),
-                    name="VWAP",
-                    hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
-        # --- Left y-axis ticks at all levels that have parameters ---
         q_cols = [c for c in levels_df.columns if c.startswith("q_")]
         if len(q_cols) > 0:
             lv_vals = (
@@ -492,21 +337,15 @@ def build_heatmap(
             lv_vals = sorted(lv_vals)
             fig.update_yaxes(tickmode="array", tickvals=lv_vals,
                              ticktext=[("{:g}".format(v)) for v in lv_vals])
-    except Exception as _e:
-        # fail-safe: do not break chart rendering
+    except Exception:
         pass
 
     # Labels as hover text
     if label_col and label_col in levels_df.columns:
-        # Build hovertext aligned with y_prices order
         lv2 = levels_df[[price_col, label_col]].dropna().copy().sort_values(price_col)
-        # Expand to Z shape
         lab = lv2[label_col].astype(str).to_list()
         hover_y = [f"{p:.2f} | {t}" for p, t in zip(y_prices, lab)]
-        if price_series is not None and overlay_mode == "path":
-            hover = np.tile(np.array(hover_y, dtype=object).reshape(-1, 1), (1, Z.shape[1]))
-        else:
-            hover = np.array(hover_y, dtype=object).reshape(-1, 1)
+        hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
     return fig
