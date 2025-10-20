@@ -333,12 +333,6 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
-            go.Scatter(
-                x=x, y=ps["price"].to_numpy(dtype=float),
-                mode="lines",
-                name="Price",
-                line=dict(width=2)
-            ),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
