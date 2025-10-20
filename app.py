@@ -57,9 +57,9 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
             S_val = float(spot_value) if spot_value is not None else None
         except Exception:
             S_val = None
-        if S_val is None and price_df is not None and "price" in getattr(price_df, "columns", []):
+        if S_val is None and price_df_used is not None:
             try:
-                S_val = float(pd.to_numeric(price_df["price"], errors="coerce").dropna().iloc[-1])
+                S_val = float(pd.to_numeric(price_df_used["price"], errors="coerce").dropna().iloc[-1])
             except Exception:
                 S_val = None
         if S_val is None or not factors:
@@ -73,10 +73,42 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
                 except Exception:
                     flip_side = None
                 break
+        # --- normalize price_df to required schema ['timestamp','price'] ---
+        ps_norm = None
+        if price_df is not None and getattr(price_df, "empty", False) is False:
+            ps = price_df.copy()
+            # map lowercase for detection
+            lmap = {c.lower(): c for c in ps.columns}
+            # choose time column
+            if "timestamp" in lmap:
+                ts = pd.to_datetime(ps[lmap["timestamp"]])
+            elif "time" in lmap:
+                ts = pd.to_datetime(ps[lmap["time"]])
+            elif "datetime" in lmap:
+                ts = pd.to_datetime(ps[lmap["datetime"]])
+            elif "t" in lmap:
+                ts = pd.to_datetime(pd.to_numeric(ps[lmap["t"]], errors="coerce"), unit="ms", utc=True)
+            else:
+                ts = None
+            # choose price column
+            price_candidates = ["price", "close", "c", "last", "p", "vw"]
+            pr = None
+            for cand in price_candidates:
+                if cand in lmap:
+                    pr = pd.to_numeric(ps[lmap[cand]], errors="coerce")
+                    break
+            if ts is not None and pr is not None:
+                ps_norm = pd.DataFrame({"timestamp": ts, "price": pr}).dropna()
+        # fallback: if normalization failed, skip overlay to avoid exceptions
+        if ps_norm is None or ps_norm.empty:
+            price_df_used = None
+        else:
+            price_df_used = ps_norm
+
         levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
         levels_df["label"] = None
         st.markdown("### Level Strength Heatmap")
-        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df, title=None)
+        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df_used, title=None)
         st.plotly_chart(fig_hm, use_container_width=True)
     except Exception as _hm_e:
         st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
