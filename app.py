@@ -175,71 +175,6 @@ def _st_hide_df(*args, **kwargs):
 def _st_hide_subheader(*args, **kwargs):
     # no-op: suppress section headers for tables
     return None
-
-
-# --- Level Strength Heatmap helper ---
-def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
-    try:
-        import pandas as pd
-        if df_final is None or getattr(df_final, "empty", True):
-            return
-        cols = set(df_final.columns)
-        # level prices
-        if "K" not in cols:
-            return
-        # factors
-        factors = {}
-        ag_col = "AG_1pct_M" if "AG_1pct_M" in cols else ("AG_1pct" if "AG_1pct" in cols else None)
-        if ag_col:
-            factors["AG"] = pd.to_numeric(df_final[ag_col], errors="coerce").abs()
-        if {"call_oi","put_oi"}.issubset(cols):
-            factors["OI"] = pd.to_numeric(df_final["call_oi"], errors="coerce").clip(lower=0) + \
-                            pd.to_numeric(df_final["put_oi"], errors="coerce").clip(lower=0)
-        if {"call_vol","put_vol"}.issubset(cols):
-            factors["VOL"] = pd.to_numeric(df_final["call_vol"], errors="coerce").clip(lower=0) + \
-                             pd.to_numeric(df_final["put_vol"], errors="coerce").clip(lower=0)
-        if "PZ" in cols:
-            factors["PZ"] = pd.to_numeric(df_final["PZ"], errors="coerce").clip(lower=0)
-        # flip as a one-hot at nearest K
-        if gflip is not None:
-            try:
-                k_near = float(df_final.loc[(df_final["K"].astype(float)-float(gflip)).abs().idxmin(), "K"])
-                g = pd.Series(0.0, index=df_final.index)
-                g.loc[df_final["K"].astype(float) == k_near] = 1.0
-                factors["GFLIP"] = g
-            except Exception:
-                pass
-        # spot
-        S_val = None
-        try:
-            S_val = float(spot_value) if spot_value is not None else None
-        except Exception:
-            S_val = None
-        if S_val is None and price_df is not None and "price" in getattr(price_df, "columns", []):
-            try:
-                S_val = float(pd.to_numeric(price_df["price"], errors="coerce").dropna().iloc[-1])
-            except Exception:
-                S_val = None
-        if S_val is None or not factors:
-            return
-        # regime from NetGEX sign if available
-        ng_col = "NetGEX_1pct_M" if "NetGEX_1pct_M" in cols else ("NetGEX_1pct" if "NetGEX_1pct" in cols else None)
-        flip_side = None
-        try:
-            if ng_col:
-                flip_side = "N" if pd.to_numeric(df_final[ng_col], errors="coerce").mean() < 0 else "P"
-        except Exception:
-            flip_side = None
-        # compute
-        levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
-        levels_df["label"] = None
-        # render
-        st.markdown("### Level Strength Heatmap")
-        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df, title=None)
-        st.plotly_chart(fig_hm, use_container_width=True)
-    except Exception as _hm_e:
-        st.warning("Heatmap failed")
-        st.exception(_hm_e)
 from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
 from lib.key_levels import render_key_levels
 from lib.heatmap import compute_scores, build_heatmap
@@ -923,9 +858,10 @@ if raw_records:
                             # Рендер
                             st.markdown("### Key Levels")
 
-                            \1
+                            render_key_levels(df_final=df_final_multi, ticker=ticker, g_flip=_gflip_m, price_df=_price_df_m, session_date=_session_date_str_m, toggle_key="key_levels_multi")
                             _render_level_strength_heatmap(df_final_multi, _price_df_m, _gflip_m, S if 'S' in locals() else None)
-# --- Advanced Analysis Block (Multi) — placed under Key Levels ---
+
+                            # --- Advanced Analysis Block (Multi) — placed under Key Levels ---
                             try:
                                 if render_advanced_analysis_block is not None:
                                     try:
