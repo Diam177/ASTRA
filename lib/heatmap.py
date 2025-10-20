@@ -309,6 +309,8 @@ def build_heatmap(
 
     if price_series is not None and overlay_mode == "path":
         ps = price_series.copy()
+        # Normalize column names to lowercase
+        ps.columns = [str(c).lower() for c in ps.columns]
         # Normalize time axis
         if "time" in ps.columns:
             x = pd.to_datetime(ps["time"], errors="coerce")
@@ -374,6 +376,8 @@ def build_heatmap(
     try:
         if price_series is not None and len(fig.data) <= 1:
             pdf = price_series.copy()
+            # Normalize column names to lowercase for flexible matching
+            pdf.columns = [str(c).lower() for c in pdf.columns]
             # Normalize time column
             if "time" not in pdf.columns:
                 if "timestamp" in pdf.columns:
