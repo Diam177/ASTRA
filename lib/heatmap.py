@@ -309,10 +309,17 @@ def build_heatmap(
 
     if price_series is not None and overlay_mode == "path":
         ps = price_series.copy()
-        if not {"timestamp", "price"}.issubset(ps.columns):
-            raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-        ps = ps.sort_values("timestamp")
-        x = pd.to_datetime(ps["timestamp"])
+        # Normalize time axis
+        if "time" in ps.columns:
+            x = pd.to_datetime(ps["time"], errors="coerce")
+        elif "timestamp" in ps.columns:
+            x = pd.to_datetime(ps["timestamp"], unit="ms", errors="coerce")
+        elif "t" in ps.columns:
+            x = pd.to_datetime(ps["t"], unit="ms", errors="coerce")
+        else:
+            raise ValueError("price_series must contain a time column: 'time' or 'timestamp' or 't'")
+        ps = ps.assign(__time=x).dropna(subset=["__time"]).sort_values("__time")
+        x = ps["__time"]
         # Tile heatmap across time for alignment
         Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
         fig = go.Figure(data=[
