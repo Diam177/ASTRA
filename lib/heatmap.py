@@ -352,59 +352,59 @@ def build_heatmap(
             xaxis=dict(showticklabels=False)
         )
 # --- Overlay: minute candles + VWAP like in Key Levels ---
-try:
-    if price_series is not None:
-        pdf = price_series.copy()
-        # flexible column names
-        pdf.columns = [str(c).lower() for c in pdf.columns]
-        # time normalization
-        if "time" not in pdf.columns:
-            if "timestamp" in pdf.columns:
-                pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
-            elif "t" in pdf.columns:
-                pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
-        if "time" in pdf.columns:
-            pdf = pdf.dropna(subset=["time"]).sort_values("time")
-            # Candlesticks if OHLC available
-            has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
-            if has_ohlc:
-                o = pdf["open"] if "open" in pdf.columns else pdf["o"]
-                h = pdf["high"] if "high" in pdf.columns else pdf["h"]
-                l = pdf["low"]  if "low"  in pdf.columns else pdf["l"]
-                c = pdf["close"] if "close" in pdf.columns else pdf["c"]
-                fig.add_trace(go.Candlestick(
-                    x=pdf["time"],
-                    open=pd.to_numeric(o, errors="coerce"),
-                    high=pd.to_numeric(h, errors="coerce"),
-                    low=pd.to_numeric(l, errors="coerce"),
-                    close=pd.to_numeric(c, errors="coerce"),
-                    name="Price",
-                    showlegend=True,
-                ))
-            # VWAP
-            vwap_series = None
-            if "vwap" in pdf.columns:
-                vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
-            elif "vw" in pdf.columns:
-                # Polygon per-bar VWAP proxy
-                vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
-            elif {"price","volume"}.issubset(set(pdf.columns)):
-                vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
-                pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(pd.NA)
-                cum_vol = vol.cumsum().replace(0, pd.NA)
-                vwap_series = (pr.mul(vol)).cumsum() / cum_vol
-            if vwap_series is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=vwap_series,
-                    mode="lines",
-                    line=dict(width=1.0, color="#E4A339"),
-                    name="VWAP",
-                    showlegend=True,
-                    hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                ))
-except Exception:
-    # fail-safe overlay
-    pass
+        try:
+            if price_series is not None:
+                pdf = price_series.copy()
+                # flexible column names
+                pdf.columns = [str(c).lower() for c in pdf.columns]
+                # time normalization
+                if "time" not in pdf.columns:
+                    if "timestamp" in pdf.columns:
+                        pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+                    elif "t" in pdf.columns:
+                        pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+                if "time" in pdf.columns:
+                    pdf = pdf.dropna(subset=["time"]).sort_values("time")
+                    # Candlesticks if OHLC available
+                    has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+                    if has_ohlc:
+                        o = pdf["open"] if "open" in pdf.columns else pdf["o"]
+                        h = pdf["high"] if "high" in pdf.columns else pdf["h"]
+                        l = pdf["low"]  if "low"  in pdf.columns else pdf["l"]
+                        c = pdf["close"] if "close" in pdf.columns else pdf["c"]
+                        fig.add_trace(go.Candlestick(
+                            x=pdf["time"],
+                            open=pd.to_numeric(o, errors="coerce"),
+                            high=pd.to_numeric(h, errors="coerce"),
+                            low=pd.to_numeric(l, errors="coerce"),
+                            close=pd.to_numeric(c, errors="coerce"),
+                            name="Price",
+                            showlegend=True,
+                        ))
+                    # VWAP
+                    vwap_series = None
+                    if "vwap" in pdf.columns:
+                        vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
+                    elif "vw" in pdf.columns:
+                        # Polygon per-bar VWAP proxy
+                        vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
+                    elif {"price","volume"}.issubset(set(pdf.columns)):
+                        vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+                        pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(pd.NA)
+                        cum_vol = vol.cumsum().replace(0, pd.NA)
+                        vwap_series = (pr.mul(vol)).cumsum() / cum_vol
+                    if vwap_series is not None:
+                        fig.add_trace(go.Scatter(
+                            x=pdf["time"], y=vwap_series,
+                            mode="lines",
+                            line=dict(width=1.0, color="#E4A339"),
+                            name="VWAP",
+                            showlegend=True,
+                            hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+                        ))
+        except Exception:
+            # fail-safe overlay
+            pass
 
         if price_series is not None and "price" in price_series:
             last_price = float(price_series["price"].iloc[-1])
