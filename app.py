@@ -15,6 +15,72 @@ if "_render_level_strength_heatmap" not in globals():
             pass
 
 
+
+
+# --- Level Strength Heatmap helper (override stub) ---
+def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
+    import pandas as pd, streamlit as st
+    try:
+        from lib.heatmap import compute_scores, build_heatmap
+    except Exception as e:
+        st.error(f"Heatmap import error: {e}")
+        return
+    try:
+        if df_final is None or getattr(df_final, "empty", True):
+            st.info("Heatmap: df_final is empty")
+            return
+        if "K" not in df_final.columns:
+            st.info("Heatmap: column 'K' not found")
+            return
+        factors = {}
+        if "AG_1pct_M" in df_final.columns:
+            factors["AG"] = pd.to_numeric(df_final["AG_1pct_M"], errors="coerce").abs()
+        elif "AG_1pct" in df_final.columns:
+            factors["AG"] = pd.to_numeric(df_final["AG_1pct"], errors="coerce").abs()
+        if {"call_oi","put_oi"}.issubset(df_final.columns):
+            factors["OI"] = pd.to_numeric(df_final["call_oi"], errors="coerce").clip(lower=0) +                             pd.to_numeric(df_final["put_oi"], errors="coerce").clip(lower=0)
+        if {"call_vol","put_vol"}.issubset(df_final.columns):
+            factors["VOL"] = pd.to_numeric(df_final["call_vol"], errors="coerce").clip(lower=0) +                              pd.to_numeric(df_final["put_vol"], errors="coerce").clip(lower=0)
+        if "PZ" in df_final.columns:
+            factors["PZ"] = pd.to_numeric(df_final["PZ"], errors="coerce").clip(lower=0)
+        if gflip is not None and "K" in df_final.columns:
+            try:
+                k_series = pd.to_numeric(df_final["K"], errors="coerce")
+                k_near = float(k_series.iloc[(k_series - float(gflip)).abs().idxmin()])
+                g = pd.Series(0.0, index=df_final.index)
+                g.loc[k_series == k_near] = 1.0
+                factors["GFLIP"] = g
+            except Exception:
+                pass
+        S_val = None
+        try:
+            S_val = float(spot_value) if spot_value is not None else None
+        except Exception:
+            S_val = None
+        if S_val is None and price_df is not None and "price" in getattr(price_df, "columns", []):
+            try:
+                S_val = float(pd.to_numeric(price_df["price"], errors="coerce").dropna().iloc[-1])
+            except Exception:
+                S_val = None
+        if S_val is None or not factors:
+            st.info("Heatmap: no spot or no factors")
+            return
+        flip_side = None
+        for cand in ("NetGEX_1pct_M", "NetGEX_1pct"):
+            if cand in df_final.columns:
+                try:
+                    flip_side = "N" if pd.to_numeric(df_final[cand], errors="coerce").mean() < 0 else "P"
+                except Exception:
+                    flip_side = None
+                break
+        levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
+        levels_df["label"] = None
+        st.markdown("### Level Strength Heatmap")
+        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df, title=None)
+        st.plotly_chart(fig_hm, use_container_width=True)
+    except Exception as _hm_e:
+        st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
+
 import os
 import json
 import requests
