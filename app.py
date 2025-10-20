@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # --- Heatmap debug stub (avoids NameError at import-time) ---
 if "_render_level_strength_heatmap" not in globals():
-    import streamlit as st, traceback  # local to avoid top-level deps if not used
+    import streamlit as st, traceback
     def _render_level_strength_heatmap(*args, **kwargs):
         try:
             st.warning("Heatmap debug: helper not yet defined; using stub")
@@ -871,6 +871,12 @@ if raw_records:
                             st.markdown("### Key Levels")
 
                             render_key_levels(df_final=df_final_multi, ticker=ticker, g_flip=_gflip_m, price_df=_price_df_m, session_date=_session_date_str_m, toggle_key="key_levels_multi")
+                            try:
+                                _render_level_strength_heatmap(df_final_multi, _price_df_m, _gflip_m, S if 'S' in locals() else None)
+                            except Exception as e:
+                                import streamlit as st, traceback
+                                st.error(f"Heatmap exception: int: 49757")
+                                st.code(traceback.format_exc())
 
                             # --- Advanced Analysis Block (Multi) — placed under Key Levels ---
                             try:
@@ -938,6 +944,12 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
+                                    try:
+                                        _render_level_strength_heatmap(df_final, _price_df, _gflip_val, S if 'S' in locals() else None)
+                                    except Exception as e:
+                                        import streamlit as st, traceback
+                                        st.error(f"Heatmap exception: int: 49757")
+                                        st.code(traceback.format_exc())
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
