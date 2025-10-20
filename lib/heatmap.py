@@ -349,3 +349,171 @@ levels_df must contain columns: price_col, score_col; optionally label_col.
         fig.data[0].update(hoverinfo="text", text=hover)
 
     return fig
+
+# --------------------------------- Price overlay helpers ---------------------------------
+
+def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
+    """
+    Добавляет свечи и VWAP к переданной фигуре.
+    Требуемые колонки price_df: ['time', 'price'] ИЛИ OHLC ['open','high','low','close'].
+    Доп. колонки: ['volume'] и/или провайдерская 'vw' (per-bar VWAP).
+    Возвращает обновлённую фигуру. Никогда не бросает исключений.
+    """
+    try:
+        if price_df is None or len(price_df) == 0:
+            return fig
+        pdf = price_df.copy()
+        # Нормализация времени
+        if "time" not in pdf.columns:
+            if "timestamp" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+            elif "t" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            else:
+                # если index — datetime
+                if isinstance(pdf.index, pd.DatetimeIndex):
+                    pdf = pdf.reset_index().rename(columns={"index": "time"})
+        pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
+        pdf = pdf.dropna(subset=["time"]).sort_values("time")
+
+        # Определение колонок цены
+        has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+        if has_ohlc:
+            # alias
+            if {"o","h","l","c"}.issubset(set(pdf.columns)) and not {"open","high","low","close"}.issubset(set(pdf.columns)):
+                pdf = pdf.rename(columns={"o":"open","h":"high","l":"low","c":"close"})
+            fig.add_trace(go.Candlestick(
+                x=pdf["time"],
+                open=pd.to_numeric(pdf["open"], errors="coerce"),
+                high=pd.to_numeric(pdf["high"], errors="coerce"),
+                low=pd.to_numeric(pdf["low"], errors="coerce"),
+                close=pd.to_numeric(pdf["close"], errors="coerce"),
+                name="Price",
+                showlegend=True,
+            ))
+        else:
+            # Линейная цена
+            col_price = None
+            for cand in ["price", "close", "c"]:
+                if cand in pdf.columns:
+                    col_price = cand
+                    break
+            if col_price is not None:
+                fig.add_trace(go.Scatter(
+                    x=pdf["time"],
+                    y=pd.to_numeric(pdf[col_price], errors="coerce"),
+                    mode="lines",
+                    line=dict(width=1.2),
+                    name="Price",
+                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
+                    showlegend=True,
+                ))
+
+        # Расчёт/извлечение VWAP
+        vwap_series = None
+        if "vw" in pdf.columns:
+            # провайдерская per-bar VWAP (Polygon: 'vw')
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
+        elif set(["price","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+        elif set(["close","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["close"], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+
+        if vwap_series is not None:
+            fig.add_trace(go.Scatter(
+                x=pdf["time"],
+                y=vwap_series,
+                mode="lines",
+                line=dict(width=1.0),
+                name="VWAP",
+                showlegend=True,
+                hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+            ))
+
+    except Exception:
+        # fail-safe: фигура должна отрисоваться даже при ошибках входных данных
+        pass
+
+    return fig
+
+
+def export_price_vwap(price_df: pd.DataFrame, out_path: str) -> str:
+    """
+    Формирует файл с колонками ['time','open','high','low','close','price','volume','vw','vwap'] где доступно.
+    Возвращает путь к файлу. Никогда не бросает исключений.
+    """
+    try:
+        if price_df is None or len(price_df) == 0:
+            # создаём пустой CSV с заголовком
+            cols = ["time","open","high","low","close","price","volume","vw","vwap"]
+            pd.DataFrame(columns=cols).to_csv(out_path, index=False)
+            return out_path
+
+        pdf = price_df.copy()
+        # Нормализация времени
+        if "time" not in pdf.columns:
+            if "timestamp" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+            elif "t" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            else:
+                if isinstance(pdf.index, pd.DatetimeIndex):
+                    pdf = pdf.reset_index().rename(columns={"index": "time"})
+        pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
+        pdf = pdf.dropna(subset=["time"]).sort_values("time")
+
+        # Выравнивание колонок и расчёт vwap
+        for alias_map in ({"o":"open","h":"high","l":"low","c":"close"},):
+            for a, b in alias_map.items():
+                if a in pdf.columns and b not in pdf.columns:
+                    pdf[b] = pdf[a]
+
+        # base price column for VWAP fallback
+        base_price = None
+        for cand in ["price","close","open"]:
+            if cand in pdf.columns:
+                base_price = cand
+                break
+
+        if "vw" in pdf.columns:
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
+        elif base_price is not None and "volume" in pdf.columns:
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf[base_price], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+        else:
+            vwap_series = pd.Series(index=pdf.index, dtype=float)
+
+        pdf["vwap"] = vwap_series
+
+        # Сохранение
+        out_path = str(out_path)
+        if out_path.lower().endswith(".parquet"):
+            try:
+                pdf.to_parquet(out_path, index=False)
+                return out_path
+            except Exception:
+                # fallback в CSV
+                out_path = out_path.rsplit(".", 1)[0] + ".csv"
+        pdf.to_csv(out_path, index=False)
+        return out_path
+    except Exception:
+        # Всегда возвращаем путь, даже если не удалось полностью рассчитать поля
+        try:
+            pd.DataFrame(price_df).to_csv(out_path, index=False)
+            return out_path
+        except Exception:
+            # last resort
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("")
+            return out_path
