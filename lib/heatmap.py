@@ -24,15 +24,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Optional, Tuple
 import numpy as np
-import pandas as pd
 
 # Prefer the same OHLC/VWAP loader used by Key Levels
 try:
-    # Reuse the exact data loader to ensure identical OHLC/VWAP and SPX→SPY VWAP proxy logic
     from app import _load_session_price_df_for_key_levels as load_session_price_df_for_heatmap
 except Exception:
-    # Fallback to None; caller must pass price_series explicitly to build_heatmap
     load_session_price_df_for_heatmap = None
+import pandas as pd
 import plotly.graph_objects as go
 
 
@@ -470,4 +468,47 @@ def build_heatmap(
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
-    return fig
+    
+    # --- Visible debug on main page ---
+    try:
+        import streamlit as st
+        import pandas as _pd
+        st.subheader("DEBUG · Heatmap")
+        # Detect sources
+        _has_ohlc = price_series is not None and (
+            {"open","high","low","close"}.issubset(set(price_series.columns)) or
+            {"o","h","l","c"}.issubset(set(price_series.columns))
+        )
+        _candles_func = "plotly.graph_objects.Candlestick" if _has_ohlc else "нет OHLC — свечи не строятся"
+        if price_series is not None and "vwap" in price_series.columns:
+            _vwap_src = "app._load_session_price_df_for_key_levels → price_df['vwap']" if load_session_price_df_for_heatmap else "price_df['vwap']"
+        elif price_series is not None and "vw" in price_series.columns:
+            _vwap_src = "price_df['vw']"
+        elif price_series is not None and "volume" in price_series.columns:
+            _vwap_src = "recalc (price*volume)/cum(volume)"
+        else:
+            _vwap_src = "TWAP fallback (в загрузчике)"
+        _traces = [{"i": i, "type": getattr(tr, "type", None), "name": getattr(tr,"name",None), "mode": getattr(tr,"mode",None)} for i, tr in enumerate(fig.data or [])]
+        _price_line_drawn = any(t["type"]=="scatter" and (str(t.get("mode","")).lower().find("line")>=0) and str(t.get("name","")).lower().startswith("price") for t in _traces)
+        st.write({
+            "overlay_mode": overlay_mode,
+            "price_loader_func": "app._load_session_price_df_for_key_levels" if load_session_price_df_for_heatmap else None,
+            "candles_func": _candles_func,
+            "vwap_source": _vwap_src,
+            "price_line_drawn": _price_line_drawn,
+            "price_cols": list(price_series.columns) if price_series is not None else None,
+            "rows": 0 if price_series is None else len(price_series),
+        })
+        try:
+            st.dataframe(_pd.DataFrame(_traces))
+        except Exception:
+            pass
+        try:
+            _cols = [c for c in ["time","timestamp","price","open","high","low","close","o","h","l","c","vwap","vw","volume"] if price_series is not None and c in price_series.columns]
+            if _cols:
+                st.dataframe(price_series[_cols].head(8))
+        except Exception:
+            pass
+    except Exception:
+        pass
+return fig
