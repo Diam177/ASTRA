@@ -405,15 +405,8 @@ def build_heatmap(
                     showlegend=True,
                 ))
             elif col_price is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
-                    mode="lines",
-                    line=dict(width=1.2),
-                    name="Price",
-                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
+                # No price line fallback per requirements
+                pass
             # VWAP
             vwap_series = None
             if "vwap" in pdf.columns:
