@@ -324,12 +324,6 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
-            go.Scatter(
-                x=x, y=ps["price"].to_numpy(dtype=float),
-                mode="lines",
-                name="Price",
-                line=dict(width=2)
-            ),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -403,17 +397,56 @@ def build_heatmap(
                     name="Price",
                     showlegend=True,
                 ))
-            elif col_price is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
-                    mode="lines",
-                    line=dict(width=1.2),
-                    name="Price",
-                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
 
-            # VWAP
+        # VWAP
+        if "vwap" in pdf.columns:
+            vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
+        elif "vw" in pdf.columns:
+            # Polygon per-bar VWAP (no volume needed) — useful for indices like I:SPX
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
+        elif set(["price","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(np.nan)
+            cum_vol = vol.cumsum()
+            if float(cum_vol.iloc[-1] or 0) > 0:
+                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
+            else:
+                vwap_series = pd.to_numeric(pdf["vw"], errors="coerce") if "vw" in pdf.columns else None
+        else:
+            vwap_series = None
+        if vwap_series is not None:
+            fig.add_trace(go.Scatter(
+                x=pdf["time"], y=vwap_series,
+                mode="lines",
+                line=dict(width=1.0),
+                name="VWAP", showlegend=True,
+                hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+            ))
+
+        if "vwap" in pdf.columns:
+            vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
+        elif "vw" in pdf.columns:
+            # Polygon per-bar VWAP (no volume needed) — useful for indices like I:SPX
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
+        elif set(["price","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(np.nan)
+            cum_vol = vol.cumsum()
+            if float(cum_vol.iloc[-1] or 0) > 0:
+                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
+            else:
+                vwap_series = pd.to_numeric(pdf["vw"], errors="coerce") if "vw" in pdf.columns else None
+        else:
+            vwap_series = None
+        if vwap_series is not None:
+            fig.add_trace(go.Scatter(
+                x=pdf["time"], y=vwap_series,
+                mode="lines",
+                line=dict(width=1.0),
+                name="VWAP", showlegend=True,
+                hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+            ))
+
             vwap_series = None
             if "vwap" in pdf.columns:
                 vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
