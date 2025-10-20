@@ -28,6 +28,22 @@ import pandas as pd
 import plotly.graph_objects as go
 
 
+# --- Internal debug helper for heatmap ---
+def _hm_debug(payload):
+    try:
+        import streamlit as st
+        st.warning("Heatmap debug")
+        try:
+            st.json(payload)
+        except Exception:
+            st.write(payload)
+    except Exception:
+        try:
+            print("[HEATMAP DEBUG]", payload)
+        except Exception:
+            pass
+
+
 # ---------------------------- Normalization helpers ----------------------------
 
 def _norm_p90(x: np.ndarray, eps: float = 1e-12) -> np.ndarray:
@@ -383,6 +399,16 @@ def build_heatmap(
 
             # Candlestick if OHLC available
             has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+            _dbg_ctx = {
+                "pdf_columns": list(pdf.columns),
+                "shape": tuple(pdf.shape),
+                "has_ohlc": bool(has_ohlc),
+                "col_price_detected": col_price,
+                "has_vwap_col": "vwap" in pdf.columns,
+                "has_vw_col": "vw" in pdf.columns,
+                "time_min": str(pd.to_datetime(pdf["time"]).min()) if "time" in pdf.columns else None,
+                "time_max": str(pd.to_datetime(pdf["time"]).max()) if "time" in pdf.columns else None,
+            }
             if has_ohlc:
                 # Map polygon aliases
                 o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
@@ -414,6 +440,7 @@ def build_heatmap(
                 vwap_series = pd.to_numeric(pdf["vw"], errors="coerce") if "vw" in pdf.columns else None
         else:
             vwap_series = None
+        _hm_debug(dict(_dbg_ctx, vwap_ready=vwap_series is not None))
         if vwap_series is not None:
             fig.add_trace(go.Scatter(
                 x=pdf["time"], y=vwap_series,
