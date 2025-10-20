@@ -350,6 +350,7 @@ levels_df must contain columns: price_col, score_col; optionally label_col.
 
     return fig
 
+
 def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
     """Свечи + VWAP только от провайдера ('vw') или уже подготовленного 'vwap'. Без перерасчётов."""
     try:
@@ -366,7 +367,6 @@ def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
                 pdf = pdf.reset_index().rename(columns={"index":"time"})
         pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
         pdf = pdf.dropna(subset=["time"]).sort_values("time")
-
         # свечи/линия
         has_ohlc = {"open","high","low","close"}.issubset(pdf.columns) or {"o","h","l","c"}.issubset(pdf.columns)
         if {"o","h","l","c"}.issubset(pdf.columns) and not {"open","high","low","close"}.issubset(pdf.columns):
@@ -389,8 +389,7 @@ def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
                     name="Price", showlegend=True,
                     hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
                 ))
-
-        # VWAP только из 'vw' или готового 'vwap'
+        # VWAP только из 'vw' или 'vwap'
         vwap_series = None
         if "vw" in pdf.columns:
             vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
@@ -405,6 +404,7 @@ def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
     except Exception:
         pass
     return fig
+
 
 def export_price_vwap(price_df: pd.DataFrame, out_path: str) -> str:
     """Экспорт минуток со свечами и VWAP от провайдера. Никаких расчётов."""
@@ -439,8 +439,9 @@ def export_price_vwap(price_df: pd.DataFrame, out_path: str) -> str:
         except Exception:
             with open(out_path,"w",encoding="utf-8") as f: f.write(""); return out_path
 
+
 def stretch_heatmap_to_price(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
-    """Растягивает теплокарту на всю ширину временного диапазона price_df (если одна колонка X)."""
+    """Растягивает теплокарту на полный временной диапазон price_df и фиксирует x-axis range."""
     try:
         if price_df is None or len(price_df) == 0:
             return fig
@@ -457,12 +458,14 @@ def stretch_heatmap_to_price(fig: go.Figure, price_df: pd.DataFrame) -> go.Figur
                 pdf = pdf.reset_index().rename(columns={"index":"time"})
         pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
         pdf = pdf.dropna(subset=["time"]).sort_values("time")
-        if pdf.empty: return fig
+        if pdf.empty:
+            return fig
         x0, x1 = pdf["time"].iloc[0], pdf["time"].iloc[-1]
-        Z = np.asarray(hm.z)
+        import numpy as _np
+        Z = _np.asarray(hm.z)
         if Z.ndim == 2 and Z.shape[1] == 1:
-            hm.update(x=[x0, x1], z=np.tile(Z, (1, 2)))
+            hm.update(x=[x0, x1], z=_np.tile(Z, (1, 2)))
+        fig.update_xaxes(type="date", range=[x0, x1])
     except Exception:
         pass
     return fig
-
