@@ -511,4 +511,4 @@ def build_heatmap(
             pass
     except Exception:
         pass
-return fig
+    return fig
