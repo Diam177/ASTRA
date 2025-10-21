@@ -107,7 +107,7 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
 
         levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
         levels_df["label"] = None
-                st.markdown("### Level Strength Heatmap")
+        st.markdown("### Level Strength Heatmap")
         fig_hm = build_heatmap(
             levels_df.rename(columns={"price":"price","score":"score"}),
             price_series=price_df_used,
