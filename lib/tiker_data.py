@@ -188,3 +188,36 @@ def get_spot_snapshot(ticker: str, api_key: str) -> float:
         return float(price)
     except Exception as e:
         raise PolygonError("Non-numeric price in Polygon snapshot") from e
+
+def get_spot_snapshot(ticker: str, api_key: str) -> float:
+    """Return a spot price for a US stock/ETF from Polygon v2 snapshot.
+    Strict order within the SAME endpoint: ticker.min.c -> ticker.day.c -> ticker.prevDay.c.
+    No external fallbacks.
+    """
+    import requests
+    if not api_key:
+        raise PolygonError("Missing POLYGON_API_KEY")
+    t = (ticker or "").strip().upper()
+    if not t:
+        raise PolygonError("Empty ticker")
+    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{t}"
+    try:
+        resp = requests.get(url, params={"apiKey": api_key}, timeout=10)
+    except Exception as e:
+        raise PolygonError("Network error on Polygon snapshot") from e
+    if resp.status_code != 200:
+        raise PolygonError(f"Polygon snapshot error: HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise PolygonError("Invalid JSON from Polygon snapshot") from e
+
+    tdata = data.get("ticker") or {}
+    for k1, k2 in (("min","c"), ("day","c"), ("prevDay","c")):
+        try:
+            val = tdata[k1][k2]
+            if val is not None:
+                return float(val)
+        except Exception:
+            pass
+    raise PolygonError("No price fields (min/day/prevDay) in Polygon snapshot")
