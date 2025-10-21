@@ -115,8 +115,8 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
             overlay_source_df=df_final,
         )
         st.plotly_chart(fig_hm, use_container_width=True)
-except Exception as _hm_e:
-        st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
+                except Exception as _hm_e:
+                    st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
 
 import os
 import json
