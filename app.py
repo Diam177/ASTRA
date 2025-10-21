@@ -108,8 +108,9 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
         levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
         levels_df["label"] = None
         st.markdown("### Level Strength Heatmap")
-        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df_used, title=None)
-        st.plotly_chart(fig_hm, use_container_width=True)
+        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}, overlay_source_df=df_final), price_series=price_df_used, title=None)
+        
+st.plotly_chart(fig_hm, use_container_width=True)
     except Exception as _hm_e:
         st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
 
