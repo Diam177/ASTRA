@@ -62,6 +62,165 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
                 S_val = float(pd.to_numeric(price_df_used["price"], errors="coerce").dropna().iloc[-1])
             except Exception:
                 S_val = None
+
+            # --- Build right-side labels identical to Key Levels ---
+            def _build_right_labels_from_final(df_final, gflip_value):
+                import numpy as np, pandas as pd
+                cols = list(df_final.columns)
+
+                # Column presence
+                y_ag  = "AG_1pct_M" if "AG_1pct_M" in cols else ("AG_1pct" if "AG_1pct" in cols else None)
+                y_ng  = "NetGEX_1pct_M" if "NetGEX_1pct_M" in cols else ("NetGEX_1pct" if "NetGEX_1pct" in cols else None)
+                has_call_oi = "call_oi" in cols
+                has_put_oi  = "put_oi"  in cols
+                has_call_vol= "call_vol" in cols
+                has_put_vol = "put_vol"  in cols
+                has_pz      = "PZ" in cols
+
+                # Primary levels
+                def _group_max_level(df, col):
+                    g = (
+                        df[["K", col]].copy()
+                        .assign(K=lambda x: pd.to_numeric(x["K"], errors="coerce"),
+                                V=lambda x: pd.to_numeric(x[col], errors="coerce"))
+                        .dropna()
+                        .groupby("K", as_index=False)["V"].sum()
+                        .sort_values("V", ascending=False)
+                    )
+                    return float(g.iloc[0]["K"]) if not g.empty else None
+
+                def _group_min_level(df, col):
+                    g = (
+                        df[["K", col]].copy()
+                        .assign(K=lambda x: pd.to_numeric(x["K"], errors="coerce"),
+                                V=lambda x: pd.to_numeric(x[col], errors="coerce"))
+                        .dropna()
+                        .groupby("K", as_index=False)["V"].sum()
+                        .sort_values("V", ascending=True)
+                    )
+                    return float(g.iloc[0]["K"]) if not g.empty else None
+
+                level_map = {}
+                if y_ng:
+                    level_map["Max Pos GEX"] = _group_max_level(df_final, y_ng)
+                    level_map["Max Neg GEX"] = _group_min_level(df_final, y_ng)
+                if has_put_oi:
+                    level_map["Max Put OI"] = _group_max_level(df_final, "put_oi")
+                if has_call_oi:
+                    level_map["Max Call OI"] = _group_max_level(df_final, "call_oi")
+                if has_put_vol:
+                    level_map["Max Put Volume"] = _group_max_level(df_final, "put_vol")
+                if has_call_vol:
+                    level_map["Max Call Volume"] = _group_max_level(df_final, "call_vol")
+                if y_ag:
+                    level_map["AG"] = _group_max_level(df_final, y_ag)
+                if has_pz:
+                    level_map["PZ"] = _group_max_level(df_final, "PZ")
+
+                # Add G-Flip if available
+                if gflip_value is not None:
+                    try:
+                        level_map["G-Flip"] = float(gflip_value)
+                    except Exception:
+                        pass
+
+                # Helper to group by K for column
+                def _group_sum_series(df, col):
+                    _g = (
+                        df[["K", col]].copy()
+                        .assign(K=lambda x: pd.to_numeric(x["K"], errors="coerce"),
+                                V=lambda x: pd.to_numeric(x[col], errors="coerce"))
+                        .dropna()
+                        .groupby("K", as_index=False)["V"].sum()
+                        .sort_values("K")
+                        .reset_index(drop=True)
+                    )
+                    return _g
+
+                attach_only_names = set()
+
+                # AG2/AG3 thresholds relative to AG
+                if y_ag:
+                    g_ag = _group_sum_series(df_final, y_ag)
+                    if not g_ag.empty:
+                        g_ag_sorted = g_ag.sort_values("V", ascending=False).reset_index(drop=True)
+                        ag1_k = level_map.get("AG", None)
+                        try:
+                            ag1_val = float(g_ag.loc[g_ag["K"] == float(ag1_k), "V"].iloc[0]) if ag1_k is not None else float(g_ag_sorted.iloc[0]["V"])
+                        except Exception:
+                            ag1_val = float(g_ag_sorted.iloc[0]["V"])
+                        if len(g_ag_sorted) >= 2:
+                            ag2_k = float(g_ag_sorted.iloc[1]["K"]); ag2_v = float(g_ag_sorted.iloc[1]["V"])
+                            level_map["AG2"] = ag2_k
+                            if ag2_v < 0.9 * ag1_val:
+                                attach_only_names.add("AG2")
+                        if len(g_ag_sorted) >= 3:
+                            ag3_k = float(g_ag_sorted.iloc[2]["K"]); ag3_v = float(g_ag_sorted.iloc[2]["V"])
+                            level_map["AG3"] = ag3_k
+                            if ag3_v < 0.9 * ag1_val:
+                                attach_only_names.add("AG3")
+
+                # P2/P3 and N2/N3 from NetGEX sign buckets
+                if y_ng:
+                    g_ng = _group_sum_series(df_final, y_ng)
+                    if not g_ng.empty:
+                        pos = g_ng[g_ng["V"] > 0].sort_values("V", ascending=False).reset_index(drop=True)
+                        neg = g_ng[g_ng["V"] < 0].sort_values("V", ascending=True).reset_index(drop=True)
+                        if len(pos) >= 2:
+                            level_map["P2"] = float(pos.iloc[1]["K"])
+                        if len(pos) >= 3:
+                            level_map["P3"] = float(pos.iloc[2]["K"])
+                        if len(neg) >= 2:
+                            level_map["N2"] = float(neg.iloc[1]["K"])
+                        if len(neg) >= 3:
+                            level_map["N3"] = float(neg.iloc[2]["K"])
+
+                # Group to y->labels with eps tolerance 0.05
+                eps = 0.05
+                groups = {}
+                for name, val in level_map.items():
+                    if val is None or not np.isfinite(val):
+                        continue
+                    y = float(val)
+                    key = None
+                    for k in list(groups.keys()):
+                        if abs(y - k) <= eps:
+                            key = k; break
+                    if key is None:
+                        groups[y] = [name]
+                    else:
+                        groups[key].append(name)
+
+                # Map display names identical to key_levels
+                display_name_map = {
+                    "Max Neg GEX": "N1",
+                    "Max Pos GEX": "P1",
+                    "Max Put OI": "Put OI",
+                    "Max Call OI": "Call OI",
+                    "Max Put Volume": "Put Vol",
+                    "Max Call Volume": "Call Vol",
+                    "AG": "AG",
+                    "PZ": "PZ",
+                    "G-Flip": "G-Flip",
+                    "AG2": "AG2",
+                    "AG3": "AG3",
+                    "P2": "P2",
+                    "P3": "P3",
+                    "N2": "N2",
+                    "N3": "N3",
+                }
+
+                right_labels = {}
+                for y, members in sorted(groups.items(), key=lambda kv: kv[0]):
+                    # If all labels are attach-only, skip like key_levels
+                    if members and all(n in attach_only_names for n in members):
+                        txt = ""
+                    else:
+                        labels_sorted = sorted(members, key=lambda s: s)
+                        txt = " + ".join(display_name_map.get(n, n) for n in labels_sorted)
+                    if txt:
+                        right_labels[float(y)] = txt
+                return right_labels
         if S_val is None or not factors:
             st.info("Heatmap: no spot or no factors")
             return
@@ -108,7 +267,13 @@ def _render_level_strength_heatmap(df_final, price_df, gflip, spot_value):
         levels_df = compute_scores(df_final["K"], factors, spot=S_val, flip_side=flip_side, norm="p90")
         levels_df["label"] = None
         st.markdown("### Level Strength Heatmap")
-        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df_used, title=None)
+
+        # Build right-side labels from df_final using same logic as Key Levels
+        try:
+            right_labels = _build_right_labels_from_final(df_final, gflip)
+        except Exception:
+            right_labels = None
+        fig_hm = build_heatmap(levels_df.rename(columns={"price":"price","score":"score"}), price_series=price_df_used, title=None, right_labels=right_labels)
         st.plotly_chart(fig_hm, use_container_width=True)
     except Exception as _hm_e:
         st.error(f"Heatmap exception: {_hm_e.__class__.__name__}: {_hm_e}")
