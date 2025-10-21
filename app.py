@@ -177,6 +177,7 @@ def _st_hide_subheader(*args, **kwargs):
     return None
 from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
 from lib.key_levels import render_key_levels
+from lib.heatmap import build_heatmap, compute_scores, ScoreConfig, add_price_overlay, export_price_vwap
 
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
@@ -925,6 +926,54 @@ if raw_records:
                                     _price_df = _load_session_price_df_for_key_levels(ticker, _session_date_str, st.secrets.get("POLYGON_API_KEY", ""))
                                     st.markdown("### Key Levels")
                                     render_key_levels(df_final=df_final, ticker=ticker, g_flip=_gflip_val, price_df=_price_df, session_date=_session_date_str, toggle_key="key_levels_main")
+
+                                    # --- Heat Map (Single) ---
+                                    try:
+                                        # Build levels_df from final table
+                                        import pandas as _pd
+                                        _df = df_final.copy()
+                                        # Ensure required columns exist
+                                        if "K" in _df.columns and "S" in _df.columns:
+                                            _spot = float(_pd.to_numeric(_df["S"], errors="coerce").median())
+                                        elif 'S' in locals():
+                                            _spot = float(S)
+                                        else:
+                                            _spot = None
+                                        # Candidate factors present in df_final
+                                        _factors = {}
+                                        for _name, _col in [("AG", "AG_1pct"), ("PZ", "PZ"), ("OI", "call_oi"), ("VOL", "call_vol"), ("GFLIP", "gflip_flag")]:
+                                            if _col in _df.columns:
+                                                _factors[_name] = _pd.to_numeric(_df[_col], errors="coerce")
+                                        # Fallback for OI/VOL combined
+                                        if "put_oi" in _df.columns and "call_oi" in _df.columns:
+                                            _factors["OI"] = _pd.to_numeric(_df["put_oi"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_oi"], errors="coerce").fillna(0)
+                                        if "put_vol" in _df.columns and "call_vol" in _df.columns:
+                                            _factors["VOL"] = _pd.to_numeric(_df["put_vol"], errors="coerce").fillna(0) + _pd.to_numeric(_df["call_vol"], errors="coerce").fillna(0)
+                                        # Compute scores if possible
+                                        if _factors and ("K" in _df.columns) and (_spot is not None):
+                                            _scores = compute_scores(level_prices=_pd.to_numeric(_df["K"], errors="coerce"), factors=_factors, spot=_spot)
+                                            _levels_df = _pd.DataFrame({ "price": _scores["price"], "score": _scores["score"] })
+                                            _levels_df["label"] = _scores.get("label", _levels_df["price"].round(2).astype(str))
+                                            _fig_hm = build_heatmap(_levels_df, price_col="price", score_col="score", label_col="label", title=f"Heat Map {ticker}")
+                                            # Overlay candles + VWAP
+                                            try:
+                                                _fig_hm = add_price_overlay(_fig_hm, _price_df)
+                                            except Exception:
+                                                pass
+                                            st.markdown("### Heat Map")
+                                            st.plotly_chart(_fig_hm, use_container_width=True)
+                                            # Export minute candles + VWAP file
+                                            try:
+                                                _out_path = export_price_vwap(_price_df, f"{ticker}_{_session_date_str}_candles_vwap.parquet")
+                                                with open(_out_path, "rb") as _f:
+                                                    st.download_button("Скачать свечи+VWAP", data=_f, file_name=f"{ticker}_{_session_date_str}_candles_vwap.parquet", use_container_width=True)
+                                            except Exception as _ex_save:
+                                                st.warning(f"Не удалось подготовить файл свечей/VWAP: {type(_ex_save).__name__}")
+                                        else:
+                                            st.info("Недостаточно данных для Heat Map.")
+                                    except Exception as _hm_e:
+                                        st.warning("Heat Map: ошибка рендера")
+                                        st.exception(_hm_e)
 
                                     # --- Advanced Analysis Block (Single) — placed under Key Levels ---
                                     try:
