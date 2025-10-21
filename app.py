@@ -481,7 +481,7 @@ dl_tables_container = st.sidebar.empty()
 S: float | None = None
 if ticker:
     try:
-        S = get_spot_snapshot(ticker, api_key)
+        S = None  # unified source: use S from the final table
         # snapshot-only spot
     except Exception as e:
         import streamlit as st
@@ -867,6 +867,13 @@ if raw_records:
                             cfg=final_cfg,
                             s_override=S,
                         )
+                        # Set S from aggregated final table to keep a single source of truth
+                        try:
+                            if S is None and df_final_multi is not None and not getattr(df_final_multi, "empty", True):
+                                if "S" in getattr(df_final_multi, "columns", []):
+                                    S = float(df_final_multi["S"].iloc[0])
+                        except Exception:
+                            pass
 
                         # --- QA: Sidebar Multi diagnostics for aggregated table ---
                         try:
@@ -1021,6 +1028,13 @@ if raw_records:
                         if exps:
                             exp_to_show = expiration if 'expiration' in locals() and expiration in final_tables else exps[0]
                             df_final = final_tables.get(exp_to_show)
+                            # Set S from the selected final table to keep a single source of truth
+                            try:
+                                if S is None and df_final is not None and not getattr(df_final, "empty", True):
+                                    if "S" in getattr(df_final, "columns", []):
+                                        S = float(df_final["S"].iloc[0])
+                            except Exception:
+                                pass
                             if df_final is not None and not getattr(df_final, "empty", True):
                                 _st_hide_subheader()
                                 _st_hide_df(df_final, use_container_width=True, hide_index=True)
