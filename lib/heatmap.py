@@ -485,7 +485,7 @@ def build_heatmap(
                               .sort_values([price_col, score_col], ascending=[True, False])
                               .drop_duplicates(subset=[price_col], keep="first"))
                     # ensure right margin for text inside plot border
-                    cur_m = dict(fig.layout.margin) if fig.layout.margin else {}
+                    cur_m = (fig.layout.margin.to_plotly_json() if fig.layout.margin else {})
                     cur_m["r"] = max(int(cur_m.get("r", 0)), 110)
                     fig.update_layout(margin=cur_m)
 
