@@ -2,15 +2,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-def _is_index_ticker(t: str) -> bool:
-    if not t:
-        return False
-    T = t.upper()
-    if T.startswith('I:'):
-        return True
-    return T in {'SPX','NDX','RUT','DJX','VIX'}
-
-
 # --- Heatmap debug stub (avoids NameError at import-time) ---
 if "_render_level_strength_heatmap" not in globals():
     import streamlit as st, traceback
@@ -306,6 +297,15 @@ from lib.tiker_data import (
     get_spot_snapshot,
     PolygonError,
 )
+
+def _is_index_ticker(t: str) -> bool:
+    if not t:
+        return False
+    T = t.upper()
+    if T.startswith('I:'):
+        return True
+    return T in {'SPX','NDX','RUT','DJX','VIX'}
+
 
 st.set_page_config(page_title="GammaStrat — df_raw", layout="wide")
 
