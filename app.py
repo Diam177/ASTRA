@@ -10,11 +10,11 @@ def _is_index_ticker(t: str) -> bool:
         return True
     return T in {'SPX','NDX','RUT','DJX','VIX'}
 
+
 # --- Heatmap debug stub (avoids NameError at import-time) ---
 if "_render_level_strength_heatmap" not in globals():
     import streamlit as st, traceback
-
-def _render_level_strength_heatmap(*args, **kwargs):
+    def _render_level_strength_heatmap(*args, **kwargs):
         try:
             st.warning("Heatmap debug: helper not yet defined; using stub")
             st.write({"args_types":[type(a).__name__ for a in args],
@@ -667,7 +667,7 @@ if raw_records:
                                 # write per-exp finals
                                 try:
                                     from lib.final_table import build_final_tables_from_corr, FinalTableConfig
-                                    finals = build_final_tables_from_corr(df_corr, windows, cfg=FinalTableConfig(, s_override=(None if _is_index_ticker(ticker) else S)))
+                                    finals = build_final_tables_from_corr(df_corr, windows, cfg=FinalTableConfig(), s_override=(None if _is_index_ticker(ticker) else S))
                                     for exp_key, fin in (finals or {}).items():
                                         if fin is None or getattr(fin, "empty", True):
                                             continue
@@ -806,7 +806,7 @@ if raw_records:
                                 zf.writestr(f"{exp_str}/{name}.csv", csv_bytes)
                             # финальная таблица
                             try:
-                                finals = build_final_tables_from_corr(df_corr_single, windows_single, cfg=FinalTableConfig(, s_override=(None if _is_index_ticker(ticker) else S)))
+                                finals = build_final_tables_from_corr(df_corr_single, windows_single, cfg=FinalTableConfig(), s_override=(None if _is_index_ticker(ticker) else S))
                                 if exp_str in finals and finals[exp_str] is not None and not getattr(finals[exp_str], 'empty', True):
                                     zf.writestr(f"{exp_str}/final_table.csv", finals[exp_str].to_csv(index=False).encode('utf-8'))
                             except Exception:
