@@ -126,6 +126,7 @@ def build_final_tables_from_corr(
     df_corr: pd.DataFrame,
     windows: Dict[str, np.ndarray],
     cfg: FinalTableConfig = FinalTableConfig(),
+    s_override: float | None = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Собирает финальные таблицы по каждой экспирации:
@@ -175,6 +176,12 @@ def build_final_tables_from_corr(
         # 4) привязка PZ/ER к таблице по K
         pz_map   = {float(k): float(v) for k, v in zip(strikes_eval, pz)}
         net_tbl["PZ"]      = net_tbl["K"].map(pz_map).fillna(0.0)
+        # enforce explicit spot override for ETF/Stocks if provided
+        if s_override is not None:
+            try:
+                net_tbl['S'] = float(s_override)
+            except Exception:
+                pass
 
         # Упорядочим колонки
         cols = ["exp","K","S"] + \
@@ -330,6 +337,7 @@ def process_from_raw(
     S: float,
     sanitizer_cfg: Optional[dict] = None,
     final_cfg: FinalTableConfig = FinalTableConfig(),
+    s_override: float | None = None,
 ) -> Dict[str, pd.DataFrame]:
     """
     Полный цикл: сырые записи -> санитайз -> окна -> NetGEX/AG -> PZ/ER -> финальные таблицы.
