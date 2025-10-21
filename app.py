@@ -177,6 +177,7 @@ def _st_hide_subheader(*args, **kwargs):
     return None
 from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
 from lib.key_levels import render_key_levels
+from lib.heatmap import compute_scores, build_heatmap
 
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
@@ -886,6 +887,35 @@ if raw_records:
                         except Exception as _klm_e:
                             st.error('Failed to display Key Levels chart (Multi)')
                             st.exception(_klm_e)
+                        # --- Heat Map (Multi) ---
+                        try:
+                            st.markdown("### Heat Map")
+                            import pandas as _pd
+                            _lvl_prices = _pd.to_numeric(df_final_multi.get("K"), errors="coerce").dropna()
+                            _lvl_prices = _lvl_prices.drop_duplicates().sort_values().reset_index(drop=True)
+                            _lvl_prices.index = _lvl_prices.values
+                            _factors = {}
+                            if "AG_1pct_M" in df_final_multi.columns:
+                                _factors["AG"] = _pd.to_numeric(df_final_multi.set_index("K")["AG_1pct_M"], errors="coerce")
+                            elif "AG_1pct" in df_final_multi.columns:
+                                _factors["AG"] = _pd.to_numeric(df_final_multi.set_index("K")["AG_1pct"], errors="coerce")
+                            if "PZ" in df_final_multi.columns:
+                                _factors["PZ"] = _pd.to_numeric(df_final_multi.set_index("K")["PZ"], errors="coerce")
+                            if {"put_oi","call_oi"}.issubset(df_final_multi.columns):
+                                _factors["OI"] = (_pd.to_numeric(df_final_multi.set_index("K")["put_oi"], errors="coerce")
+                                                  + _pd.to_numeric(df_final_multi.set_index("K")["call_oi"], errors="coerce"))
+                            if {"put_vol","call_vol"}.issubset(df_final_multi.columns):
+                                _factors["VOL"] = (_pd.to_numeric(df_final_multi.set_index("K")["put_vol"], errors="coerce")
+                                                   + _pd.to_numeric(df_final_multi.set_index("K")["call_vol"], errors="coerce"))
+                            _S_val = float(_pd.to_numeric(df_final_multi.get("S"), errors="coerce").median()) if ("S" in df_final_multi.columns) else (S if 'S' in locals() else None)
+                            _lv_series = _pd.Series(_lvl_prices.values, index=_lvl_prices.index, name="price")
+                            _scores_df = compute_scores(level_prices=_lv_series, factors=_factors, spot=float(_S_val) if _S_val is not None else float(S))
+                            _fig_hm = build_heatmap(_scores_df, price_series=_price_df_m if '_price_df_m' in locals() else None, price_col="price", score_col="score", label_col=None, title=None)
+                            st.plotly_chart(_fig_hm, use_container_width=True)
+                        except Exception as _hm_e:
+                            st.error("Unable to display Heat Map (Multi)")
+                            st.exception(_hm_e)
+
 
 
                     else:
@@ -953,6 +983,33 @@ if raw_records:
                                 except Exception as _kl_e:
                                     st.error('Failed to display Key Levels chart')
                                     st.exception(_kl_e)
+                                    # --- Heat Map (Single) ---
+                                    try:
+                                        st.markdown("### Heat Map")
+                                        import pandas as _pd
+                                        _lvl_prices = _pd.to_numeric(df_final.get("K"), errors="coerce").dropna()
+                                        _lvl_prices = _lvl_prices.drop_duplicates().sort_values().reset_index(drop=True)
+                                        _lvl_prices.index = _lvl_prices.values
+                                        _factors = {}
+                                        if "AG_1pct" in df_final.columns:
+                                            _factors["AG"] = _pd.to_numeric(df_final.set_index("K")["AG_1pct"], errors="coerce")
+                                        if "PZ" in df_final.columns:
+                                            _factors["PZ"] = _pd.to_numeric(df_final.set_index("K")["PZ"], errors="coerce")
+                                        if {"put_oi","call_oi"}.issubset(df_final.columns):
+                                            _factors["OI"] = (_pd.to_numeric(df_final.set_index("K")["put_oi"], errors="coerce")
+                                                              + _pd.to_numeric(df_final.set_index("K")["call_oi"], errors="coerce"))
+                                        if {"put_vol","call_vol"}.issubset(df_final.columns):
+                                            _factors["VOL"] = (_pd.to_numeric(df_final.set_index("K")["put_vol"], errors="coerce")
+                                                               + _pd.to_numeric(df_final.set_index("K")["call_vol"], errors="coerce"))
+                                        _S_val = float(_pd.to_numeric(df_final.get("S"), errors="coerce").median()) if ("S" in df_final.columns) else (S if 'S' in locals() else None)
+                                        _lv_series = _pd.Series(_lvl_prices.values, index=_lvl_prices.index, name="price")
+                                        _scores_df = compute_scores(level_prices=_lv_series, factors=_factors, spot=float(_S_val) if _S_val is not None else float(S))
+                                        _fig_hm = build_heatmap(_scores_df, price_series=_price_df if '_price_df' in locals() else None, price_col="price", score_col="score", label_col=None, title=None)
+                                        st.plotly_chart(_fig_hm, use_container_width=True)
+                                    except Exception as _hm_e:
+                                        st.error("Unable to display Heat Map (Single)")
+                                        st.exception(_hm_e)
+
 
                             else:
                                 st.info("The final table is empty for the selected expiration.")
