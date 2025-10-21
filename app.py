@@ -292,8 +292,9 @@ from lib.key_levels import render_key_levels
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
 from lib.tiker_data import (
-    list_future_expirations,
+    ensure_request_limit,
     download_snapshot_json,
+    download_agg_bars_json,
     get_spot_snapshot,
     PolygonError,
 )
@@ -305,7 +306,6 @@ def _is_index_ticker(t: str) -> bool:
     if T.startswith('I:'):
         return True
     return T in {'SPX','NDX','RUT','DJX','VIX'}
-
 
 st.set_page_config(page_title="GammaStrat — df_raw", layout="wide")
 
