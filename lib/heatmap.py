@@ -488,4 +488,4 @@ def build_heatmap(
                 fig.add_hline(y=y, line=dict(color="white", width=1, dash="dot"), layer="above", opacity=0.9)
         except Exception:
             pass
-return fig
+    return fig
