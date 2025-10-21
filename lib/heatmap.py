@@ -336,7 +336,6 @@ def build_heatmap(
             xaxis_title="Time",
             yaxis_title="Price",
             template="plotly_white",
-            height=800,
         )
     else:
         # Single-column heatmap with optional horizontal price line
@@ -356,103 +355,11 @@ def build_heatmap(
             xaxis_title="",
             yaxis_title="Price",
             template="plotly_white",
-            height=800,
             xaxis=dict(showticklabels=False)
         )
         if price_series is not None and "price" in price_series:
             last_price = float(price_series["price"].iloc[-1])
             fig.add_hline(y=last_price, line=dict(width=2), annotation_text="Spot")
-
-    # --- Overlay: minute Price candles and VWAP like in key_levels ---
-    try:
-        if price_series is not None and len(fig.data) <= 1:
-            pdf = price_series.copy()
-            # Normalize time column
-            if "time" not in pdf.columns:
-                if "timestamp" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
-                elif "t" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
-            # If still no time column but index looks like datetime, use it
-            if "time" not in pdf.columns and isinstance(pdf.index, pd.DatetimeIndex):
-                pdf = pdf.reset_index().rename(columns={"index":"time"})
-            if "time" not in pdf.columns:
-                raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-            pdf = pdf.dropna(subset=["time"]).sort_values("time")
-
-            # Choose price columns
-            col_price = None
-            if "price" in pdf.columns:
-                col_price = "price"
-            elif "c" in pdf.columns:
-                col_price = "c"
-
-            # Candlestick if OHLC available
-            has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
-            if has_ohlc:
-                # Map polygon aliases
-                o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
-                h = pdf["high"] if "high" in pdf.columns else pd.to_numeric(pdf["h"], errors="coerce")
-                l = pdf["low"]  if "low"  in pdf.columns else pd.to_numeric(pdf["l"], errors="coerce")
-                c = pdf["close"] if "close" in pdf.columns else pd.to_numeric(pdf["c"], errors="coerce")
-                fig.add_trace(go.Candlestick(
-                    x=pdf["time"], open=pd.to_numeric(o, errors="coerce"),
-                    high=pd.to_numeric(h, errors="coerce"),
-                    low=pd.to_numeric(l, errors="coerce"),
-                    close=pd.to_numeric(c, errors="coerce"),
-                    name="Price",
-                    showlegend=True,
-                ))
-            elif col_price is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
-                    mode="lines",
-                    line=dict(width=1.2),
-                    name="Price",
-                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
-            # VWAP
-            vwap_series = None
-            if "vwap" in pdf.columns:
-                vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
-            elif "vw" in pdf.columns:
-                try:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
-                except Exception:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
-            elif col_price is not None and "volume" in pdf.columns:
-                vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
-                pr  = pd.to_numeric(pdf[col_price], errors="coerce").fillna(pd.NA)
-                cum_vol = vol.cumsum()
-                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
-            if vwap_series is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=vwap_series,
-                    mode="lines",
-                    line=dict(width=1.0),
-                    name="VWAP",
-                    hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
-        # --- Left y-axis ticks at all levels that have parameters ---
-        q_cols = [c for c in levels_df.columns if c.startswith("q_")]
-        if len(q_cols) > 0:
-            lv_vals = (
-                levels_df.loc[(levels_df[q_cols] > 0).any(axis=1), price_col]
-                .astype(float).dropna().unique().tolist()
-            )
-        else:
-            lv_vals = levels_df[price_col].astype(float).dropna().unique().tolist()
-        if len(lv_vals) > 0:
-            lv_vals = sorted(lv_vals)
-            fig.update_yaxes(tickmode="array", tickvals=lv_vals,
-                             ticktext=[("{:g}".format(v)) for v in lv_vals])
-    except Exception as _e:
-        # fail-safe: do not break chart rendering
-        pass
 
     # Labels as hover text
     if label_col and label_col in levels_df.columns:
@@ -466,48 +373,5 @@ def build_heatmap(
         else:
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
-        # --- Side annotations like in Key Levels ---
-        try:
-            if label_col and (label_col in levels_df.columns):
-                _ann = levels_df[[price_col, score_col, label_col]].copy()
-                _ann[price_col] = pd.to_numeric(_ann[price_col], errors="coerce")
-                _ann[score_col] = pd.to_numeric(_ann[score_col], errors="coerce")
-                _ann[label_col] = _ann[label_col].astype(str).str.strip()
-                _ann = _ann.dropna(subset=[price_col])
-                _ann = _ann[_ann[label_col] != ""]
-                if not _ann.empty:
-                    _ann = (_ann.sort_values([price_col, score_col], ascending=[True, False])
-                                 .drop_duplicates(subset=[price_col], keep="first"))
-                    # ensure room at right for text
-                    m = (fig.layout.margin.to_plotly_json() if fig.layout.margin else {})
-                    m["r"] = max(int(m.get("r", 0)), 110)
-                    fig.update_layout(margin=m)
-
-                    def _label_color(s: str) -> str:
-                        u = s.upper()
-                        if "G-FLIP" in u or "GFLIP" in u: return "#AAAAAA"
-                        if "PZ" in u: return "#E4C51E"
-                        if "AG" in u: return "#9A7DF7"
-                        if "PUT OI" in u: return "#800020"
-                        if "CALL OI" in u: return "#2ECC71"
-                        if "PUT VOL" in u: return "#FF8C00"
-                        if "CALL VOL" in u: return "#1E88E5"
-                        return "#DDDDDD"
-
-                    for _, r0 in _ann.iterrows():
-                        fig.add_annotation(
-                            x=1.0, xref="paper",
-                            y=float(r0[price_col]), yref="y",
-                            text=str(r0[label_col]),
-                            showarrow=False,
-                            xanchor="right", yanchor="middle",
-                            align="right",
-                            font=dict(size=10, color=_label_color(str(r0[label_col]))),
-                            bgcolor="rgba(0,0,0,0.35)",
-                            borderwidth=0
-                        )
-        except Exception:
-            pass
-
 
     return fig
