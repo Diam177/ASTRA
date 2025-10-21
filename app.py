@@ -1,6 +1,7 @@
 
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+from heatmap import compute_scores, build_heatmap
 
 import os
 import json
@@ -855,7 +856,35 @@ if raw_records:
                             _session_date_str_m = pd.Timestamp.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
                             _price_df_m = _load_session_price_df_for_key_levels(ticker, _session_date_str_m, st.secrets.get("POLYGON_API_KEY", ""))
                             # Рендер
-                            st.markdown("### Key Levels")
+                            st.markdown("### Key Levels
+
+# --- Heatmap render (always on) ---
+try:
+    # Expect df_final with columns like K, AG_1pct, call_oi, put_oi, call_vol, put_vol, optional PZ
+    if 'df_final' in locals() and isinstance(df_final, pd.DataFrame) and not df_final.empty:
+        level_prices = df_final['K'] if 'K' in df_final.columns else None
+        if level_prices is not None:
+            factors = {}
+            if 'AG_1pct' in df_final.columns:
+                factors['AG'] = df_final['AG_1pct']
+            if 'call_oi' in df_final.columns or 'put_oi' in df_final.columns:
+                factors['OI'] = df_final.get('call_oi', 0) + df_final.get('put_oi', 0)
+            if 'call_vol' in df_final.columns or 'put_vol' in df_final.columns:
+                factors['VOL'] = df_final.get('call_vol', 0) + df_final.get('put_vol', 0)
+            if 'PZ' in df_final.columns:
+                factors['PZ'] = df_final['PZ']
+            if len(factors)>0:
+                scores = compute_scores(level_prices=level_prices, factors=factors)
+                # price_df expected to be DataFrame with ['time','price'] or ['timestamp','price']
+                _price_df_for_hm = None
+                if 'price_df' in locals() and isinstance(price_df, pd.DataFrame) and not price_df.empty:
+                    _price_df_for_hm = price_df
+                fig_hm = build_heatmap(level_prices=level_prices, scores=scores, spot=float(S) if 'S' in locals() else None, price_df=_price_df_for_hm)
+                st.plotly_chart(fig_hm, use_container_width=True)
+except Exception as _e_hm:
+    st.warning("Heatmap скрыт из-за ошибки рендера.")
+# --- End Heatmap render ---
+")
 
                             render_key_levels(df_final=df_final_multi, ticker=ticker, g_flip=_gflip_m, price_df=_price_df_m, session_date=_session_date_str_m, toggle_key="key_levels_multi")
 
