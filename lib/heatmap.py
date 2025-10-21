@@ -466,5 +466,48 @@ def build_heatmap(
         else:
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
+        # --- Side annotations like in Key Levels ---
+        try:
+            if label_col and (label_col in levels_df.columns):
+                _ann = levels_df[[price_col, score_col, label_col]].copy()
+                _ann[price_col] = pd.to_numeric(_ann[price_col], errors="coerce")
+                _ann[score_col] = pd.to_numeric(_ann[score_col], errors="coerce")
+                _ann[label_col] = _ann[label_col].astype(str).str.strip()
+                _ann = _ann.dropna(subset=[price_col])
+                _ann = _ann[_ann[label_col] != ""]
+                if not _ann.empty:
+                    _ann = (_ann.sort_values([price_col, score_col], ascending=[True, False])
+                                 .drop_duplicates(subset=[price_col], keep="first"))
+                    # ensure room at right for text
+                    m = (fig.layout.margin.to_plotly_json() if fig.layout.margin else {})
+                    m["r"] = max(int(m.get("r", 0)), 110)
+                    fig.update_layout(margin=m)
+
+                    def _label_color(s: str) -> str:
+                        u = s.upper()
+                        if "G-FLIP" in u or "GFLIP" in u: return "#AAAAAA"
+                        if "PZ" in u: return "#E4C51E"
+                        if "AG" in u: return "#9A7DF7"
+                        if "PUT OI" in u: return "#800020"
+                        if "CALL OI" in u: return "#2ECC71"
+                        if "PUT VOL" in u: return "#FF8C00"
+                        if "CALL VOL" in u: return "#1E88E5"
+                        return "#DDDDDD"
+
+                    for _, r0 in _ann.iterrows():
+                        fig.add_annotation(
+                            x=1.0, xref="paper",
+                            y=float(r0[price_col]), yref="y",
+                            text=str(r0[label_col]),
+                            showarrow=False,
+                            xanchor="right", yanchor="middle",
+                            align="right",
+                            font=dict(size=10, color=_label_color(str(r0[label_col]))),
+                            bgcolor="rgba(0,0,0,0.35)",
+                            borderwidth=0
+                        )
+        except Exception:
+            pass
+
 
     return fig
