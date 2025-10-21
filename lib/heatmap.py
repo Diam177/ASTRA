@@ -473,4 +473,64 @@ def build_heatmap(
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
+    
+    # --- Optional: right-side strike labels identical to Key Levels ---
+    try:
+        if right_labels:
+            # Determine the rightmost x value inside plot
+            x_vals = None
+            try:
+                x_vals = list(fig.data[0]['x'])
+            except Exception:
+                x_vals = None
+            x_right_val = x_vals[-1] if isinstance(x_vals, (list, tuple)) and len(x_vals) > 0 else None
+            # Current y scale values for snapping
+            y_axis_vals = None
+            try:
+                y_axis_vals = [float(v) for v in fig.data[0]['y']]
+            except Exception:
+                y_axis_vals = None
+            eps = 0.05
+            for k_raw, txt in sorted(right_labels.items(), key=lambda kv: kv[0]):
+                try:
+                    y0 = float(k_raw)
+                except Exception:
+                    continue
+                y_use = y0
+                if isinstance(y_axis_vals, list) and y_axis_vals:
+                    nearest = min(y_axis_vals, key=lambda v: abs(v - y0))
+                    if abs(nearest - y0) <= eps:
+                        y_use = nearest
+                if not isinstance(txt, str) or not txt.strip():
+                    continue
+                if x_right_val is not None:
+                    fig.add_annotation(
+                        x=x_right_val, xref="x",
+                        y=float(y_use), yref="y",
+                        text=txt.strip(),
+                        showarrow=False,
+                        xanchor="right", yanchor="bottom",
+                        xshift=-2, yshift=6,
+                        align="right",
+                        font=dict(size=10, color="#FFFFFF"),
+                        bgcolor="rgba(0,0,0,0.35)",
+                        borderwidth=0.5,
+                    )
+                else:
+                    fig.add_annotation(
+                        x=1.0, xref="paper",
+                        y=float(y_use), yref="y",
+                        text=txt.strip(),
+                        showarrow=False,
+                        xanchor="right", yanchor="bottom",
+                        yshift=6,
+                        align="right",
+                        font=dict(size=10, color="#FFFFFF"),
+                        bgcolor="rgba(0,0,0,0.35)",
+                        borderwidth=0.5,
+                    )
+    except Exception:
+        # do not fail rendering because of labels
+        pass
+
     return fig
