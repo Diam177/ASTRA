@@ -466,30 +466,23 @@ def build_heatmap(
         else:
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
-        # --- Side annotations similar to Key Levels ---
+        # --- Side annotations like in Key Levels ---
         try:
             if label_col and (label_col in levels_df.columns):
-                ann_df = (
-                    levels_df[[price_col, score_col, label_col]]
-                    .copy()
-                )
-                # sanitize
-                ann_df[price_col] = pd.to_numeric(ann_df[price_col], errors="coerce")
-                ann_df[score_col] = pd.to_numeric(ann_df[score_col], errors="coerce")
-                ann_df[label_col] = ann_df[label_col].astype(str).str.strip()
-                ann_df = ann_df.dropna(subset=[price_col])
-                ann_df = ann_df[ann_df[label_col] != ""]
-                if not ann_df.empty:
-                    # one label per price: take highest score per price
-                    ann_df = (ann_df
-                              .sort_values([price_col, score_col], ascending=[True, False])
-                              .drop_duplicates(subset=[price_col], keep="first"))
-                    # ensure right margin for text inside plot border
-                    cur_m = (fig.layout.margin.to_plotly_json() if fig.layout.margin else {})
-                    cur_m["r"] = max(int(cur_m.get("r", 0)), 110)
-                    fig.update_layout(margin=cur_m)
+                _ann = levels_df[[price_col, score_col, label_col]].copy()
+                _ann[price_col] = pd.to_numeric(_ann[price_col], errors="coerce")
+                _ann[score_col] = pd.to_numeric(_ann[score_col], errors="coerce")
+                _ann[label_col] = _ann[label_col].astype(str).str.strip()
+                _ann = _ann.dropna(subset=[price_col])
+                _ann = _ann[_ann[label_col] != ""]
+                if not _ann.empty:
+                    _ann = (_ann.sort_values([price_col, score_col], ascending=[True, False])
+                                 .drop_duplicates(subset=[price_col], keep="first"))
+                    # ensure room at right for text
+                    m = (fig.layout.margin.to_plotly_json() if fig.layout.margin else {})
+                    m["r"] = max(int(m.get("r", 0)), 110)
+                    fig.update_layout(margin=m)
 
-                    # colors consistent with Key Levels
                     def _label_color(s: str) -> str:
                         u = s.upper()
                         if "G-FLIP" in u or "GFLIP" in u: return "#AAAAAA"
@@ -501,14 +494,13 @@ def build_heatmap(
                         if "CALL VOL" in u: return "#1E88E5"
                         return "#DDDDDD"
 
-                    for _, r0 in ann_df.iterrows():
+                    for _, r0 in _ann.iterrows():
                         fig.add_annotation(
                             x=1.0, xref="paper",
                             y=float(r0[price_col]), yref="y",
                             text=str(r0[label_col]),
                             showarrow=False,
                             xanchor="right", yanchor="middle",
-                            yshift=0,
                             align="right",
                             font=dict(size=10, color=_label_color(str(r0[label_col]))),
                             bgcolor="rgba(0,0,0,0.35)",
