@@ -309,14 +309,23 @@ def build_heatmap(
 
     if price_series is not None and overlay_mode == "path":
         ps = price_series.copy()
-        if not {"timestamp", "price"}.issubset(ps.columns):
-            raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-        ps = ps.sort_values("timestamp")
-        x = pd.to_datetime(ps["timestamp"])
+        # Normalize column names to lowercase
+        ps.columns = [str(c).lower() for c in ps.columns]
+        # Normalize time axis
+        if "time" in ps.columns:
+            x = pd.to_datetime(ps["time"], errors="coerce")
+        elif "timestamp" in ps.columns:
+            x = pd.to_datetime(ps["timestamp"], unit="ms", errors="coerce")
+        elif "t" in ps.columns:
+            x = pd.to_datetime(ps["t"], unit="ms", errors="coerce")
+        else:
+            raise ValueError("price_series must contain a time column: 'time' or 'timestamp' or 't'")
+        ps = ps.assign(__time=x).dropna(subset=["__time"]).sort_values("__time")
+        x = ps["__time"]
         # Tile heatmap across time for alignment
-        Z = np.tile(scores.reshape(-1, 1).astype(float), (1, len(x)))
+        Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
         fig = go.Figure(data=[
-            go.Heatmap(zsmooth="best", 
+            go.Heatmap(
                 z=Z,
                 x=x,
                 y=y_prices,
@@ -325,17 +334,18 @@ def build_heatmap(
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
         ])
-        fig.update_layout(height=850, 
+        fig.update_layout(
             title=title or "Level Strength Heatmap",
             xaxis_title="Time",
             yaxis_title="Price",
             template="plotly_white",
+            height=800,
         )
     else:
         # Single-column heatmap with optional horizontal price line
         Z = scores.reshape(-1, 1)
         fig = go.Figure(data=[
-            go.Heatmap(zsmooth="best", 
+            go.Heatmap(
                 z=Z,
                 x=["strength"],
                 y=y_prices,
@@ -344,71 +354,110 @@ def build_heatmap(
                 colorbar=dict(title="Level strength", ticksuffix="")
             )
         ])
-        fig.update_layout(height=850, 
+        fig.update_layout(
             title=title or "Level Strength Heatmap",
             xaxis_title="",
             yaxis_title="Price",
             template="plotly_white",
+            height=800,
             xaxis=dict(showticklabels=False)
         )
-# --- Overlay: minute candles + VWAP like in Key Levels ---
-        try:
-            if price_series is not None:
-                pdf = price_series.copy()
-                # flexible column names
-                pdf.columns = [str(c).lower() for c in pdf.columns]
-                # time normalization
-                if "time" not in pdf.columns:
-                    if "timestamp" in pdf.columns:
-                        pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
-                    elif "t" in pdf.columns:
-                        pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
-                if "time" in pdf.columns:
-                    pdf = pdf.dropna(subset=["time"]).sort_values("time")
-                    # Candlesticks if OHLC available
-                    has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
-                    if has_ohlc:
-                        o = pdf["open"] if "open" in pdf.columns else pdf["o"]
-                        h = pdf["high"] if "high" in pdf.columns else pdf["h"]
-                        l = pdf["low"]  if "low"  in pdf.columns else pdf["l"]
-                        c = pdf["close"] if "close" in pdf.columns else pdf["c"]
-                        fig.add_trace(go.Candlestick(
-                            x=pdf["time"],
-                            open=pd.to_numeric(o, errors="coerce"),
-                            high=pd.to_numeric(h, errors="coerce"),
-                            low=pd.to_numeric(l, errors="coerce"),
-                            close=pd.to_numeric(c, errors="coerce"),
-                            name="Price",
-                            showlegend=True,
-                        ))
-                    # VWAP
-                    vwap_series = None
-                    if "vwap" in pdf.columns:
-                        vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
-                    elif "vw" in pdf.columns:
-                        # Polygon per-bar VWAP proxy
-                        vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
-                    elif {"price","volume"}.issubset(set(pdf.columns)):
-                        vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
-                        pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(pd.NA)
-                        cum_vol = vol.cumsum().replace(0, pd.NA)
-                        vwap_series = (pr.mul(vol)).cumsum() / cum_vol
-                    if vwap_series is not None:
-                        fig.add_trace(go.Scatter(
-                            x=pdf["time"], y=vwap_series,
-                            mode="lines",
-                            line=dict(width=1.0, color="#E4A339"),
-                            name="VWAP",
-                            showlegend=True,
-                            hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                        ))
-        except Exception:
-            # fail-safe overlay
-            pass
-
         if price_series is not None and "price" in price_series:
             last_price = float(price_series["price"].iloc[-1])
             fig.add_hline(y=last_price, line=dict(width=2), annotation_text="Spot")
+
+    # --- Overlay: minute Price candles and VWAP like in key_levels ---
+    try:
+        if price_series is not None and len(fig.data) <= 1:
+            pdf = price_series.copy()
+            # Normalize column names to lowercase for flexible matching
+            pdf.columns = [str(c).lower() for c in pdf.columns]
+            # Normalize time column
+            if "time" not in pdf.columns:
+                if "timestamp" in pdf.columns:
+                    pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+                elif "t" in pdf.columns:
+                    pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            # If still no time column but index looks like datetime, use it
+            if "time" not in pdf.columns and isinstance(pdf.index, pd.DatetimeIndex):
+                pdf = pdf.reset_index().rename(columns={"index":"time"})
+            if "time" not in pdf.columns:
+                raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
+            pdf = pdf.dropna(subset=["time"]).sort_values("time")
+
+            # Choose price columns
+            col_price = None
+            if "price" in pdf.columns:
+                col_price = "price"
+            elif "c" in pdf.columns:
+                col_price = "c"
+
+            # Candlestick if OHLC available
+            has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+            if has_ohlc:
+                # Map polygon aliases
+                o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
+                h = pdf["high"] if "high" in pdf.columns else pd.to_numeric(pdf["h"], errors="coerce")
+                l = pdf["low"]  if "low"  in pdf.columns else pd.to_numeric(pdf["l"], errors="coerce")
+                c = pdf["close"] if "close" in pdf.columns else pd.to_numeric(pdf["c"], errors="coerce")
+                fig.add_trace(go.Candlestick(
+                    x=pdf["time"], open=pd.to_numeric(o, errors="coerce"),
+                    high=pd.to_numeric(h, errors="coerce"),
+                    low=pd.to_numeric(l, errors="coerce"),
+                    close=pd.to_numeric(c, errors="coerce"),
+                    name="Price",
+                    showlegend=True,
+                ))
+            elif col_price is not None:
+                fig.add_trace(go.Scatter(
+                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
+                    mode="lines",
+                    line=dict(width=1.2),
+                    name="Price",
+                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
+                    showlegend=True,
+                ))
+
+            # VWAP
+            vwap_series = None
+            if "vwap" in pdf.columns:
+                vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
+            elif "vw" in pdf.columns:
+                try:
+                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
+                except Exception:
+                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
+            elif col_price is not None and "volume" in pdf.columns:
+                vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+                pr  = pd.to_numeric(pdf[col_price], errors="coerce").fillna(pd.NA)
+                cum_vol = vol.cumsum()
+                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
+            if vwap_series is not None:
+                fig.add_trace(go.Scatter(
+                    x=pdf["time"], y=vwap_series,
+                    mode="lines",
+                    line=dict(width=1.0),
+                    name="VWAP",
+                    hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+                    showlegend=True,
+                ))
+
+        # --- Left y-axis ticks at all levels that have parameters ---
+        q_cols = [c for c in levels_df.columns if c.startswith("q_")]
+        if len(q_cols) > 0:
+            lv_vals = (
+                levels_df.loc[(levels_df[q_cols] > 0).any(axis=1), price_col]
+                .astype(float).dropna().unique().tolist()
+            )
+        else:
+            lv_vals = levels_df[price_col].astype(float).dropna().unique().tolist()
+        if len(lv_vals) > 0:
+            lv_vals = sorted(lv_vals)
+            fig.update_yaxes(tickmode="array", tickvals=lv_vals,
+                             ticktext=[("{:g}".format(v)) for v in lv_vals])
+    except Exception as _e:
+        # fail-safe: do not break chart rendering
+        pass
 
     # Labels as hover text
     if label_col and label_col in levels_df.columns:
