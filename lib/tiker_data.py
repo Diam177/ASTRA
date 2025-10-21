@@ -155,3 +155,36 @@ def _poly_get_json(url: str, api_key: str, params: dict | None = None, timeout: 
         return {}
 
 # get_spot_price removed per spec
+
+# ---------------------------------------------------------------------------
+# Spot snapshot for stocks/ETFs only
+def get_spot_snapshot(ticker: str, api_key: str) -> float:
+    """Return last trade price for a US stock/ETF via Polygon v2 snapshot.
+    Uses the explicit apiKey query param per user policy. No fallbacks.
+    Raises PolygonError on any error or missing field.
+    """
+    import requests
+    if not api_key:
+        raise PolygonError("Missing POLYGON_API_KEY")
+    t = (ticker or "").strip().upper()
+    if not t:
+        raise PolygonError("Empty ticker")
+    url = f"https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/{t}"
+    try:
+        resp = requests.get(url, params={"apiKey": api_key}, timeout=10)
+    except Exception as e:
+        raise PolygonError("Network error on Polygon snapshot") from e
+    if resp.status_code != 200:
+        raise PolygonError(f"Polygon snapshot error: HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except Exception as e:
+        raise PolygonError("Invalid JSON from Polygon snapshot") from e
+    try:
+        price = data["ticker"]["lastTrade"]["p"]
+    except Exception as e:
+        raise PolygonError("Missing lastTrade.p in Polygon snapshot") from e
+    try:
+        return float(price)
+    except Exception as e:
+        raise PolygonError("Non-numeric price in Polygon snapshot") from e
