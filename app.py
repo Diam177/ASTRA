@@ -291,13 +291,11 @@ from lib.key_levels import render_key_levels
 
 # Project imports
 from lib.sanitize_window import sanitize_and_window_pipeline
-from lib.tiker_data import (
-    ensure_request_limit,
-    download_snapshot_json,
-    download_agg_bars_json,
-    get_spot_snapshot,
-    PolygonError,
-)
+from lib.tiker_data import ensure_request_limit
+from lib.tiker_data import download_snapshot_json
+from lib.tiker_data import download_agg_bars_json
+from lib.tiker_data import get_spot_snapshot
+from lib.tiker_data import PolygonError
 
 def _is_index_ticker(t: str) -> bool:
     if not t:
