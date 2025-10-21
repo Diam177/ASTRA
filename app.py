@@ -481,8 +481,23 @@ dl_tables_container = st.sidebar.empty()
 S: float | None = None
 if ticker:
     try:
-        S = None  # unified source: use S from the final table
-        # snapshot-only spot
+        if _is_index_ticker(ticker):
+            # single source: index spot comes from option snapshot -> underlying_asset.value
+            _s = None
+            for _r in (raw_records or []):
+                try:
+                    ua = _r.get("underlying_asset") or {}
+                    if "value" in ua and ua["value"] is not None:
+                        _s = float(ua["value"])
+                        break
+                except Exception:
+                    continue
+            if _s is None:
+                raise PolygonError("Missing underlying_asset.value in snapshot")
+            S = _s
+        else:
+            # stocks/ETFs: use Polygon v2 snapshot as source of truth
+            S = get_spot_snapshot(ticker, api_key)
     except Exception as e:
         import streamlit as st
         # Graceful handling: invalid ticker or network error
