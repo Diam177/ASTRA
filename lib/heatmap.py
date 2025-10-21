@@ -423,4 +423,69 @@ def build_heatmap(
             hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
-    return fig
+    
+    # --- Optional overlay of key-level lines from final table ---
+    if overlay_key_levels and overlay_source_df is not None:
+        try:
+            import numpy as _np
+            import pandas as _pd
+            _df = overlay_source_df
+            cols = set(_df.columns)
+            def _agg_pick(df, col, fun="max", n=1, sign=None):
+                if col not in cols:
+                    return []
+                g = (
+                    df[["K", col]].copy()
+                    .assign(K=lambda x: _pd.to_numeric(x["K"], errors="coerce"),
+                            V=lambda x: _pd.to_numeric(x[col], errors="coerce"))
+                    .dropna()
+                    .groupby("K", as_index=False)["V"].sum()
+                    .sort_values("V", ascending=(fun=="min"))
+                )
+                if sign == "neg":
+                    g = g[g["V"] < 0]
+                elif sign == "pos":
+                    g = g[g["V"] > 0]
+                if g.empty:
+                    return []
+                if n == 1:
+                    return [float(g.iloc[0]["K"])]
+                return [float(v) for v in g.head(n)["K"].tolist()]
+
+            ng_col = "NetGEX_1pct_M" if "NetGEX_1pct_M" in cols else ("NetGEX_1pct" if "NetGEX_1pct" in cols else None)
+            ag_col = "AG_1pct_M" if "AG_1pct_M" in cols else ("AG_1pct" if "AG_1pct" in cols else None)
+            overlay_levels = []
+
+            if ng_col:
+                overlay_levels += _agg_pick(_df, ng_col, fun="min", n=3, sign="neg")  # N1..N3
+                overlay_levels += _agg_pick(_df, ng_col, fun="max", n=3, sign="pos")  # P1..P3
+            overlay_levels += _agg_pick(_df, "put_oi", fun="max", n=1)
+            overlay_levels += _agg_pick(_df, "call_oi", fun="max", n=1)
+            overlay_levels += _agg_pick(_df, "put_vol", fun="max", n=1) if "put_vol" in cols else []
+            overlay_levels += _agg_pick(_df, "call_vol", fun="max", n=1) if "call_vol" in cols else []
+            if ag_col:
+                overlay_levels += _agg_pick(_df, ag_col, fun="max", n=1)
+            overlay_levels += _agg_pick(_df, "PZ", fun="max", n=1) if "PZ" in cols else []
+
+            if ng_col:
+                g = (
+                    _df[["K", ng_col]].copy()
+                    .assign(K=lambda x: _pd.to_numeric(x["K"], errors="coerce"),
+                            V=lambda x: _pd.to_numeric(x[ng_col], errors="coerce"))
+                    .dropna()
+                    .groupby("K", as_index=False)["V"].sum()
+                    .sort_values("K")
+                )
+                if not g.empty and g["V"].min() < 0 and g["V"].max() > 0:
+                    Ks = g["K"].to_numpy(dtype=float)
+                    Vs = g["V"].to_numpy(dtype=float)
+                    idx = _np.where(_np.sign(Vs[:-1]) * _np.sign(Vs[1:]) < 0)[0]
+                    if idx.size:
+                        overlay_levels.append(float(Ks[idx[0]]))
+
+            ys = sorted(set([float(y) for y in overlay_levels if _np.isfinite(y)]))
+            for y in ys:
+                fig.add_hline(y=y, line=dict(color="white", width=1, dash="dot"), layer="above", opacity=0.9)
+        except Exception:
+            pass
+return fig
