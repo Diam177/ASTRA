@@ -314,7 +314,7 @@ def build_heatmap(
         ps = ps.sort_values("timestamp")
         x = pd.to_datetime(ps["timestamp"])
         # Tile heatmap across time for alignment
-        Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
+        Z = np.tile(scores.reshape(-1, 1).astype(float), (1, len(x)))
         fig = go.Figure(data=[
             go.Heatmap(zsmooth="best", 
                 z=Z,
@@ -335,7 +335,7 @@ def build_heatmap(
         # Single-column heatmap with optional horizontal price line
         Z = scores.reshape(-1, 1)
         fig = go.Figure(data=[
-            go.Heatmap(
+            go.Heatmap(zsmooth="best", 
                 z=Z,
                 x=["strength"],
                 y=y_prices,
