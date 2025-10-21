@@ -307,6 +307,7 @@ def _is_index_ticker(t: str) -> bool:
         return True
     return T in {'SPX','NDX','RUT','DJX','VIX'}
 
+
 st.set_page_config(page_title="GammaStrat — df_raw", layout="wide")
 
 # --- Helpers -----------------------------------------------------------------
