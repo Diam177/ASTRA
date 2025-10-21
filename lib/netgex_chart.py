@@ -104,14 +104,11 @@ def render_netgex_bars(
     else:
         st.warning("Нет столбцов NetGEX_1pct_M / NetGEX_1pct — нечего рисовать.")
         return
-
-    # spot
-    if spot is None and "S" in df_final.columns and df_final["S"].notna().any():
-        spot = float(df_final["S"].dropna().iloc[0])
-
 # --- Toggles: single horizontal row ---
     # --- Toggles: single horizontal row ---
 
+    # spot: single source of truth from final table
+    spot = (float(df_final["S"].dropna().iloc[0]) if ("S" in df_final.columns and df_final["S"].notna().any()) else None)
     # компактный зазор между колонками с тумблерами
     st.markdown(
         "<style>div[data-testid='column']{padding-left:0px!important;padding-right:2px!important}</style>",
