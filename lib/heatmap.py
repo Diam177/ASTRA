@@ -325,7 +325,7 @@ def build_heatmap(
                 colorbar=dict(title="Level strength", ticksuffix="")
             ),
         ])
-        fig.update_layout(
+        fig.update_layout(height=850, 
             title=title or "Level Strength Heatmap",
             xaxis_title="Time",
             yaxis_title="Price",
@@ -344,7 +344,7 @@ def build_heatmap(
                 colorbar=dict(title="Level strength", ticksuffix="")
             )
         ])
-        fig.update_layout(
+        fig.update_layout(height=850, 
             title=title or "Level Strength Heatmap",
             xaxis_title="",
             yaxis_title="Price",
