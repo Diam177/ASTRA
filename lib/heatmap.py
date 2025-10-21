@@ -310,6 +310,21 @@ def build_heatmap(
     if price_series is not None and overlay_mode == "path":
         ps = price_series.copy()
         if not {"timestamp", "price"}.issubset(ps.columns):
+            # Normalize price_df to accept either ['time','price'] or ['timestamp','price']
+            if price_df is not None:
+                pdf = price_df.copy()
+                cols = set(pdf.columns)
+                if 'time' not in cols and 'timestamp' in cols:
+                    pdf = pdf.rename(columns={'timestamp':'time'})
+                # require at least time and price
+                if not {'time','price'}.issubset(set(pdf.columns)):
+                    price_df = None
+                else:
+                    if not pd.api.types.is_datetime64_any_dtype(pdf['time']):
+                        pdf['time'] = pd.to_datetime(pdf['time'], errors='coerce', utc=True)
+                    pdf = pdf.dropna(subset=['time','price']).sort_values('time').reset_index(drop=True)
+                    price_df = pdf
+
             raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
         ps = ps.sort_values("timestamp")
         x = pd.to_datetime(ps["timestamp"])
