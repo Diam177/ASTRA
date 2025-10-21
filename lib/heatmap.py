@@ -289,6 +289,7 @@ def build_heatmap(
     zmax: float = 400.0,
     title: Optional[str] = None,
     overlay_mode: str = "path",   # {"path","line"}
+    right_labels: Optional[Dict[float, str]] = None,
 ) -> go.Figure:
     """
     Build a Viridis heatmap of level strength with optional price overlay.
