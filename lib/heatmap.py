@@ -316,7 +316,7 @@ def build_heatmap(
         # Tile heatmap across time for alignment
         Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
         fig = go.Figure(data=[
-            go.Heatmap(
+            go.Heatmap(zsmooth="best", 
                 z=Z,
                 x=x,
                 y=y_prices,
