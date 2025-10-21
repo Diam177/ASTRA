@@ -8,9 +8,7 @@ API:
 - compute_scores(level_prices, factors, *, spot, flip_side=None, weights=None,
                  type_map=None, norm="p90", lambda_types=0.2, tau=0.015,
                  side_gain=0.15, cap_percentile=95) -> pandas.DataFrame
-- build_heatmap(levels_df, price_series=None, *, price_col="price",
-                score_col="score", label_col=None, zmin=0, zmax=400,
-                title=None, overlay_mode="path") -> plotly.graph_objects.Figure
+- build_heatmap(levels_df, *, price_col="price", score_col="score", label_col=None, zmin=0, zmax=400, title=None) -> plotly.graph_objects.Figure
 
 Notes:
 - No history used. All normalizations are within the current snapshot/session.
@@ -291,168 +289,42 @@ def build_heatmap(
     overlay_mode: str = "path",   # {"path","line"}
 ) -> go.Figure:
     """
-    Build a Viridis heatmap of level strength with optional price overlay.
-
-    levels_df must contain columns: price_col, score_col; optionally label_col.
-    price_series, if provided, must contain ["timestamp","price"]. When given and
-    overlay_mode="path", the heatmap is tiled across time to align a price path.
+    Build a Viridis heatmap of level strength.
+levels_df must contain columns: price_col, score_col; optionally label_col.
     """
     if price_col not in levels_df or score_col not in levels_df:
         raise ValueError(f"levels_df must have '{price_col}' and '{score_col}' columns")
 
-    # Prepare axes
+        # Prepare axes
     lv = levels_df[[price_col, score_col]].dropna().copy()
     lv = lv.sort_values(price_col)
     y_prices = lv[price_col].to_numpy(dtype=float)
     scores = lv[score_col].to_numpy(dtype=float)
     scores = np.clip(scores, zmin, zmax)
 
-    if price_series is not None and overlay_mode == "path":
-        ps = price_series.copy()
-        if not {"timestamp", "price"}.issubset(ps.columns):
-            # Normalize price_df to accept either ['time','price'] or ['timestamp','price']
-            if price_df is not None:
-                pdf = price_df.copy()
-                cols = set(pdf.columns)
-                if 'time' not in cols and 'timestamp' in cols:
-                    pdf = pdf.rename(columns={'timestamp':'time'})
-                # require at least time and price
-                if not {'time','price'}.issubset(set(pdf.columns)):
-                    price_df = None
-                else:
-                    if not pd.api.types.is_datetime64_any_dtype(pdf['time']):
-                        pdf['time'] = pd.to_datetime(pdf['time'], errors='coerce', utc=True)
-                    pdf = pdf.dropna(subset=['time','price']).sort_values('time').reset_index(drop=True)
-                    price_df = pdf
-
-            raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-        ps = ps.sort_values("timestamp")
-        x = pd.to_datetime(ps["timestamp"])
-        # Tile heatmap across time for alignment
-        Z = np.tile(scores.reshape(-1, 1), (1, len(x)))
-        fig = go.Figure(data=[
-            go.Heatmap(
-                z=Z,
-                x=x,
-                y=y_prices,
-                colorscale="Viridis",
-                zmin=zmin, zmax=zmax,
-                colorbar=dict(title="Level strength", ticksuffix="")
-            ),
-            go.Scatter(
-                x=x, y=ps["price"].to_numpy(dtype=float),
-                mode="lines",
-                name="Price",
-                line=dict(width=2)
-            ),
-        ])
-        fig.update_layout(
-            title=title or "Level Strength Heatmap",
-            xaxis_title="Time",
-            yaxis_title="Price",
-            template="plotly_white",
-            height=800,
+    # Single-column heatmap
+    Z = scores.reshape(-1, 1)
+    fig = go.Figure(data=[
+        go.Heatmap(
+            z=Z,
+            x=["strength"],
+            y=y_prices,
+            colorscale="Viridis",
+            zmin=zmin, zmax=zmax,
+            colorbar=dict(title="Level strength", ticksuffix="")
         )
-    else:
-        # Single-column heatmap with optional horizontal price line
-        Z = scores.reshape(-1, 1)
-        fig = go.Figure(data=[
-            go.Heatmap(
-                z=Z,
-                x=["strength"],
-                y=y_prices,
-                colorscale="Viridis",
-                zmin=zmin, zmax=zmax,
-                colorbar=dict(title="Level strength", ticksuffix="")
-            )
-        ])
-        fig.update_layout(
-            title=title or "Level Strength Heatmap",
-            xaxis_title="",
-            yaxis_title="Price",
-            template="plotly_white",
-            height=800,
-            xaxis=dict(showticklabels=False)
-        )
-        if price_series is not None and "price" in price_series:
-            last_price = float(price_series["price"].iloc[-1])
-            fig.add_hline(y=last_price, line=dict(width=2), annotation_text="Spot")
+    ])
+    fig.update_layout(
+        title=title or "Level Strength Heatmap",
+        xaxis_title="",
+        yaxis_title="Price",
+        template="plotly_white",
+        height=800,
+        xaxis=dict(showticklabels=False)
+    )
 
-    # --- Overlay: minute Price candles and VWAP like in key_levels ---
+    # Left y-axis ticks at all levels with nonzero factors if present
     try:
-        if price_series is not None and len(fig.data) <= 1:
-            pdf = price_series.copy()
-            # Normalize time column
-            if "time" not in pdf.columns:
-                if "timestamp" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
-                elif "t" in pdf.columns:
-                    pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
-            # If still no time column but index looks like datetime, use it
-            if "time" not in pdf.columns and isinstance(pdf.index, pd.DatetimeIndex):
-                pdf = pdf.reset_index().rename(columns={"index":"time"})
-            if "time" not in pdf.columns:
-                raise ValueError("price_series must contain ['timestamp','price'] or ['time','price']")
-            pdf = pdf.dropna(subset=["time"]).sort_values("time")
-
-            # Choose price columns
-            col_price = None
-            if "price" in pdf.columns:
-                col_price = "price"
-            elif "c" in pdf.columns:
-                col_price = "c"
-
-            # Candlestick if OHLC available
-            has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
-            if has_ohlc:
-                # Map polygon aliases
-                o = pdf["open"] if "open" in pdf.columns else pd.to_numeric(pdf["o"], errors="coerce")
-                h = pdf["high"] if "high" in pdf.columns else pd.to_numeric(pdf["h"], errors="coerce")
-                l = pdf["low"]  if "low"  in pdf.columns else pd.to_numeric(pdf["l"], errors="coerce")
-                c = pdf["close"] if "close" in pdf.columns else pd.to_numeric(pdf["c"], errors="coerce")
-                fig.add_trace(go.Candlestick(
-                    x=pdf["time"], open=pd.to_numeric(o, errors="coerce"),
-                    high=pd.to_numeric(h, errors="coerce"),
-                    low=pd.to_numeric(l, errors="coerce"),
-                    close=pd.to_numeric(c, errors="coerce"),
-                    name="Price",
-                    showlegend=True,
-                ))
-            elif col_price is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
-                    mode="lines",
-                    line=dict(width=1.2),
-                    name="Price",
-                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
-            # VWAP
-            vwap_series = None
-            if "vwap" in pdf.columns:
-                vwap_series = pd.to_numeric(pdf["vwap"], errors="coerce")
-            elif "vw" in pdf.columns:
-                try:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce").expanding().mean()
-                except Exception:
-                    vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
-            elif col_price is not None and "volume" in pdf.columns:
-                vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
-                pr  = pd.to_numeric(pdf[col_price], errors="coerce").fillna(pd.NA)
-                cum_vol = vol.cumsum()
-                vwap_series = (pr.mul(vol)).cumsum() / cum_vol.replace(0, np.nan)
-            if vwap_series is not None:
-                fig.add_trace(go.Scatter(
-                    x=pdf["time"], y=vwap_series,
-                    mode="lines",
-                    line=dict(width=1.0),
-                    name="VWAP",
-                    hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                    showlegend=True,
-                ))
-
-        # --- Left y-axis ticks at all levels that have parameters ---
         q_cols = [c for c in levels_df.columns if c.startswith("q_")]
         if len(q_cols) > 0:
             lv_vals = (
@@ -465,21 +337,183 @@ def build_heatmap(
             lv_vals = sorted(lv_vals)
             fig.update_yaxes(tickmode="array", tickvals=lv_vals,
                              ticktext=[("{:g}".format(v)) for v in lv_vals])
-    except Exception as _e:
-        # fail-safe: do not break chart rendering
+    except Exception:
         pass
 
     # Labels as hover text
     if label_col and label_col in levels_df.columns:
-        # Build hovertext aligned with y_prices order
         lv2 = levels_df[[price_col, label_col]].dropna().copy().sort_values(price_col)
-        # Expand to Z shape
         lab = lv2[label_col].astype(str).to_list()
         hover_y = [f"{p:.2f} | {t}" for p, t in zip(y_prices, lab)]
-        if price_series is not None and overlay_mode == "path":
-            hover = np.tile(np.array(hover_y, dtype=object).reshape(-1, 1), (1, Z.shape[1]))
-        else:
-            hover = np.array(hover_y, dtype=object).reshape(-1, 1)
+        hover = np.array(hover_y, dtype=object).reshape(-1, 1)
         fig.data[0].update(hoverinfo="text", text=hover)
 
     return fig
+
+# --------------------------------- Price overlay helpers ---------------------------------
+
+def add_price_overlay(fig: go.Figure, price_df: pd.DataFrame) -> go.Figure:
+    """
+    Добавляет свечи и VWAP к переданной фигуре.
+    Требуемые колонки price_df: ['time', 'price'] ИЛИ OHLC ['open','high','low','close'].
+    Доп. колонки: ['volume'] и/или провайдерская 'vw' (per-bar VWAP).
+    Возвращает обновлённую фигуру. Никогда не бросает исключений.
+    """
+    try:
+        if price_df is None or len(price_df) == 0:
+            return fig
+        pdf = price_df.copy()
+        # Нормализация времени
+        if "time" not in pdf.columns:
+            if "timestamp" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+            elif "t" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            else:
+                # если index — datetime
+                if isinstance(pdf.index, pd.DatetimeIndex):
+                    pdf = pdf.reset_index().rename(columns={"index": "time"})
+        pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
+        pdf = pdf.dropna(subset=["time"]).sort_values("time")
+
+        # Определение колонок цены
+        has_ohlc = {"open","high","low","close"}.issubset(set(pdf.columns)) or {"o","h","l","c"}.issubset(set(pdf.columns))
+        if has_ohlc:
+            # alias
+            if {"o","h","l","c"}.issubset(set(pdf.columns)) and not {"open","high","low","close"}.issubset(set(pdf.columns)):
+                pdf = pdf.rename(columns={"o":"open","h":"high","l":"low","c":"close"})
+            fig.add_trace(go.Candlestick(
+                x=pdf["time"],
+                open=pd.to_numeric(pdf["open"], errors="coerce"),
+                high=pd.to_numeric(pdf["high"], errors="coerce"),
+                low=pd.to_numeric(pdf["low"], errors="coerce"),
+                close=pd.to_numeric(pdf["close"], errors="coerce"),
+                name="Price",
+                showlegend=True,
+            ))
+        else:
+            # Линейная цена
+            col_price = None
+            for cand in ["price", "close", "c"]:
+                if cand in pdf.columns:
+                    col_price = cand
+                    break
+            if col_price is not None:
+                fig.add_trace(go.Scatter(
+                    x=pdf["time"],
+                    y=pd.to_numeric(pdf[col_price], errors="coerce"),
+                    mode="lines",
+                    line=dict(width=1.2),
+                    name="Price",
+                    hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
+                    showlegend=True,
+                ))
+
+        # Расчёт/извлечение VWAP
+        vwap_series = None
+        if "vw" in pdf.columns:
+            # провайдерская per-bar VWAP (Polygon: 'vw')
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
+        elif set(["price","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["price"], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+        elif set(["close","volume"]).issubset(set(pdf.columns)):
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf["close"], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+
+        if vwap_series is not None:
+            fig.add_trace(go.Scatter(
+                x=pdf["time"],
+                y=vwap_series,
+                mode="lines",
+                line=dict(width=1.0),
+                name="VWAP",
+                showlegend=True,
+                hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
+            ))
+
+    except Exception:
+        # fail-safe: фигура должна отрисоваться даже при ошибках входных данных
+        pass
+
+    return fig
+
+
+def export_price_vwap(price_df: pd.DataFrame, out_path: str) -> str:
+    """
+    Формирует файл с колонками ['time','open','high','low','close','price','volume','vw','vwap'] где доступно.
+    Возвращает путь к файлу. Никогда не бросает исключений.
+    """
+    try:
+        if price_df is None or len(price_df) == 0:
+            # создаём пустой CSV с заголовком
+            cols = ["time","open","high","low","close","price","volume","vw","vwap"]
+            pd.DataFrame(columns=cols).to_csv(out_path, index=False)
+            return out_path
+
+        pdf = price_df.copy()
+        # Нормализация времени
+        if "time" not in pdf.columns:
+            if "timestamp" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+            elif "t" in pdf.columns:
+                pdf["time"] = pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            else:
+                if isinstance(pdf.index, pd.DatetimeIndex):
+                    pdf = pdf.reset_index().rename(columns={"index": "time"})
+        pdf["time"] = pd.to_datetime(pdf["time"], errors="coerce")
+        pdf = pdf.dropna(subset=["time"]).sort_values("time")
+
+        # Выравнивание колонок и расчёт vwap
+        for alias_map in ({"o":"open","h":"high","l":"low","c":"close"},):
+            for a, b in alias_map.items():
+                if a in pdf.columns and b not in pdf.columns:
+                    pdf[b] = pdf[a]
+
+        # base price column for VWAP fallback
+        base_price = None
+        for cand in ["price","close","open"]:
+            if cand in pdf.columns:
+                base_price = cand
+                break
+
+        if "vw" in pdf.columns:
+            vwap_series = pd.to_numeric(pdf["vw"], errors="coerce")
+        elif base_price is not None and "volume" in pdf.columns:
+            vol = pd.to_numeric(pdf["volume"], errors="coerce").fillna(0.0)
+            pr  = pd.to_numeric(pdf[base_price], errors="coerce").fillna(pd.NA)
+            cum_vol = vol.cumsum()
+            denom = cum_vol.replace(0, pd.NA)
+            vwap_series = (pr.mul(vol)).cumsum() / denom
+        else:
+            vwap_series = pd.Series(index=pdf.index, dtype=float)
+
+        pdf["vwap"] = vwap_series
+
+        # Сохранение
+        out_path = str(out_path)
+        if out_path.lower().endswith(".parquet"):
+            try:
+                pdf.to_parquet(out_path, index=False)
+                return out_path
+            except Exception:
+                # fallback в CSV
+                out_path = out_path.rsplit(".", 1)[0] + ".csv"
+        pdf.to_csv(out_path, index=False)
+        return out_path
+    except Exception:
+        # Всегда возвращаем путь, даже если не удалось полностью рассчитать поля
+        try:
+            pd.DataFrame(price_df).to_csv(out_path, index=False)
+            return out_path
+        except Exception:
+            # last resort
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write("")
+            return out_path
