@@ -443,6 +443,29 @@ def render_key_levels(
 
     
     # Отображаемые имена серий в легенде
+    
+    # --- Override levels from centralized final_table metadata if available ---
+    try:
+        _levels = getattr(df_final, "attrs", {}).get("levels_summary", {})
+        def _lv(name):
+            v = _levels.get(name, None)
+            return float(v.get("k")) if isinstance(v, dict) and ("k" in v) else None
+        # Primary peaks
+        _p1 = _lv("P1"); _n1 = _lv("N1"); _ag1 = _lv("AG1")
+        if _p1 is not None:
+            level_map["Max Pos GEX"] = _p1
+        if _n1 is not None:
+            level_map["Max Neg GEX"] = _n1
+        if _ag1 is not None:
+            level_map["AG"] = _ag1
+        # Secondary/tertiary
+        for nm in ["P2","P3","N2","N3","AG2","AG3"]:
+            _k = _lv(nm)
+            if _k is not None:
+                level_map[nm] = _k
+    except Exception:
+        pass
+
     display_name_map = {
         "Max Neg GEX": "N1",
         "Max Pos GEX": "P1",
