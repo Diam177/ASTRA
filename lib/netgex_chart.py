@@ -1,37 +1,13 @@
-# -*- coding: utf-8 -*-
-"""
-netgex_chart.py — бар‑чарт Net GEX для главной страницы.
-
-Функция render_netgex_bars(df_final, ticker, spot=None, toggle_key=None):
-  • df_final: DataFrame по одной экспирации (или агрегированной multi‑финалке)
-  • ticker: строка для подписи в левом верхнем углу
-  • spot: текущая цена БА; если None — берётся из df_final['S']
-  • toggle_key: уникальный ключ для st.toggle
-
-Зависимости: plotly>=5, pandas, streamlit
-"""
-
 from __future__ import annotations
 from typing import Optional, Sequence
 import pandas as _pd
-import streamlit as st
 import numpy as _np
+import plotly.graph_objects as go
+import streamlit as st
 
-def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
-    """
-    Delegates to gflip precomputed in final_table. Kept for backward compatibility.
-    """
-    try:
-        meta = getattr(df_final, "attrs", {})
-        g = meta.get("gflip", {}) if isinstance(meta, dict) else {}
-        val = g.get("cross", None)
-        return float(val) if val is not None else None
-    except Exception:
-        return None
-
-
-def _to_num(a: Sequence) -> _np.ndarray:
-    return _np.array(_pd.to_numeric(a, errors='coerce'), dtype=float)
+COLOR_POS = '#60A5E7'
+COLOR_NEG = '#D9493A'
+COLOR_PRICE = '#E4A339'
 
 def render_netgex_bars(
     df_final: _pd.DataFrame,
@@ -124,7 +100,7 @@ def render_netgex_bars(
 
     Ks = df["K"].to_numpy(dtype=float)
     Ys = df[y_col].to_numpy(dtype=float)
-    g_flip = _compute_gamma_flip_from_table(df_final, y_col, spot)
+    g_flip = _compute_gamma_flip_from_table(df, y_col, spot)
     
     # Последовательные позиции без "пустых" промежутков между страйками
     x_idx = _np.arange(len(Ks), dtype=float)
@@ -149,6 +125,8 @@ def render_netgex_bars(
     # Создаем customdata для hover
     customdata_list = []
     for i, k in enumerate(Ks):
+    # Fallbacks for color constants to avoid NameError if globals are missing
+
         hd = hover_data.get(k, {})
         customdata_list.append([
             k,  # Strike
@@ -194,11 +172,11 @@ def render_netgex_bars(
         x=x_idx,
         y=_subset(Ys, pos_mask),
         name="Net GEX (>0)",
-        marker_color=COLOR_POS,
+        marker_color=_COLOR_POS,
         width=bar_width,
         customdata=customdata_list,
         hovertemplate=hover_tmpl,
-        hoverlabel=dict(bgcolor=COLOR_POS, bordercolor="white",
+        hoverlabel=dict(bgcolor=_COLOR_POS, bordercolor="white",
                         font=dict(size=13, color="white")),
     ))
     # Отрицательные бары (красные)
@@ -206,11 +184,11 @@ def render_netgex_bars(
         x=x_idx,
         y=_subset(Ys, neg_mask),
         name="Net GEX (<0)",
-        marker_color=COLOR_NEG,
+        marker_color=_COLOR_NEG,
         width=bar_width,
         customdata=customdata_list,
         hovertemplate=hover_tmpl,
-        hoverlabel=dict(bgcolor=COLOR_NEG, bordercolor="white",
+        hoverlabel=dict(bgcolor=_COLOR_NEG, bordercolor="white",
                         font=dict(size=13, color="white")),
     ))
 # --- Put OI markers (toggle-controlled) ---
@@ -392,9 +370,9 @@ def render_netgex_bars(
         
         y0 = min(0.0, float(_np.nanmin(Ys))) * 1.05
         y1 = max(0.0, float(_np.nanmax(Ys))) * 1.05
-        fig.add_shape(type="line", x0=x_price, x1=x_price, y0=y0, y1=y1, line=dict(color=COLOR_PRICE, width=2))
+        fig.add_shape(type="line", x0=x_price, x1=x_price, y0=y0, y1=y1, line=dict(color=_COLOR_PRICE, width=2))
         fig.add_annotation(x=x_price, y=y1, text=f"Price: {spot:.2f}", showarrow=False, yshift=8,
-                           font=dict(color=COLOR_PRICE, size=12), xanchor="center")
+                           font=dict(color=_COLOR_PRICE, size=12), xanchor="center")
     
     # Тикер
     if ticker:
