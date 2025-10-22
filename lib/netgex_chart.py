@@ -6,11 +6,9 @@ import plotly.graph_objects as go
 import streamlit as st
 
 COLOR_POS = '#60A5E7'
-# alias for legacy name
-_COLOR_POS = COLOR_POS
+COLOR_POS = COLOR_POS
 COLOR_NEG = '#D9493A'
-# alias for legacy name
-_COLOR_NEG = COLOR_NEG
+COLOR_NEG = COLOR_NEG
 
 
 def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
@@ -186,11 +184,11 @@ def render_netgex_bars(
         x=x_idx,
         y=_subset(Ys, pos_mask),
         name="Net GEX (>0)",
-        marker_color=_COLOR_POS,
+        marker_color=COLOR_POS,
         width=bar_width,
         customdata=customdata_list,
         hovertemplate=hover_tmpl,
-        hoverlabel=dict(bgcolor=_COLOR_POS, bordercolor="white",
+        hoverlabel=dict(bgcolor=COLOR_POS, bordercolor="white",
                         font=dict(size=13, color="white")),
     ))
     # Отрицательные бары (красные)
@@ -198,11 +196,11 @@ def render_netgex_bars(
         x=x_idx,
         y=_subset(Ys, neg_mask),
         name="Net GEX (<0)",
-        marker_color=_COLOR_NEG,
+        marker_color=COLOR_NEG,
         width=bar_width,
         customdata=customdata_list,
         hovertemplate=hover_tmpl,
-        hoverlabel=dict(bgcolor=_COLOR_NEG, bordercolor="white",
+        hoverlabel=dict(bgcolor=COLOR_NEG, bordercolor="white",
                         font=dict(size=13, color="white")),
     ))
 # --- Put OI markers (toggle-controlled) ---
@@ -384,9 +382,9 @@ def render_netgex_bars(
         
         y0 = min(0.0, float(_np.nanmin(Ys))) * 1.05
         y1 = max(0.0, float(_np.nanmax(Ys))) * 1.05
-        fig.add_shape(type="line", x0=x_price, x1=x_price, y0=y0, y1=y1, line=dict(color=_COLOR_PRICE, width=2))
+        fig.add_shape(type="line", x0=x_price, x1=x_price, y0=y0, y1=y1, line=dict(color=COLOR_PRICE, width=2))
         fig.add_annotation(x=x_price, y=y1, text=f"Price: {spot:.2f}", showarrow=False, yshift=8,
-                           font=dict(color=_COLOR_PRICE, size=12), xanchor="center")
+                           font=dict(color=COLOR_PRICE, size=12), xanchor="center")
     
     # Тикер
     if ticker:
