@@ -275,6 +275,23 @@ def build_final_tables_from_corr(
             _meta = _levels_and_gflip_from_final(net_tbl)
             net_tbl.attrs["gflip"] = _meta.get("gflip", {})
             net_tbl.attrs["levels_summary"] = _meta.get("levels", {})
+
+            # Emit scalar columns with level strikes for compatibility with downstream code
+            try:
+                _lv = _meta.get("levels", {}) if isinstance(_meta, dict) else {}
+                for _name in ["P1","P2","P3","N1","N2","N3","AG1","AG2","AG3"]:
+                    _k = None
+                    if isinstance(_lv.get(_name, {}), dict):
+                        _k = _lv.get(_name, {}).get("k", None)
+                    if _k is None:
+                        import numpy as _np
+                        net_tbl[_name] = _np.nan
+                    else:
+                        net_tbl[_name] = float(_k)
+            except Exception:
+                # Best-effort: do not break pipeline if metadata is absent
+                pass
+
         except Exception:
             # do not fail pipeline on metadata
             pass
@@ -425,6 +442,22 @@ def build_final_sum_from_corr(
         _meta = _levels_and_gflip_from_final(base)
         base.attrs["gflip"] = _meta.get("gflip", {})
         base.attrs["levels_summary"] = _meta.get("levels", {})
+
+        # Emit scalar columns with level strikes for compatibility
+        try:
+            _lv = _meta.get("levels", {}) if isinstance(_meta, dict) else {}
+            for _name in ["P1","P2","P3","N1","N2","N3","AG1","AG2","AG3"]:
+                _k = None
+                if isinstance(_lv.get(_name, {}), dict):
+                    _k = _lv.get(_name, {}).get("k", None)
+                if _k is None:
+                    import numpy as _np
+                    base[_name] = _np.nan
+                else:
+                    base[_name] = float(_k)
+        except Exception:
+            pass
+
     except Exception:
         pass
     return base
