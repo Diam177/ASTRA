@@ -7,8 +7,6 @@ import streamlit as st
 
 COLOR_POS = '#60A5E7'
 COLOR_NEG = '#D9493A'
-# alias for legacy name
-_COLOR_PRICE = COLOR_PRICE
 
 
 def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
