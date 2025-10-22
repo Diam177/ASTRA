@@ -76,6 +76,8 @@ except NameError:
 
 
 import numpy as _np
+import plotly.graph_objects as go
+
 
 def _to_num(a: Sequence) -> _np.ndarray:
     return _np.array(_pd.to_numeric(a, errors='coerce'), dtype=float)
