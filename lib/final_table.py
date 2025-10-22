@@ -264,6 +264,23 @@ def build_final_tables_from_corr(
         if "AG_1pct_M" in net_tbl.columns:
             cols += ["AG_1pct_M","NetGEX_1pct_M"]
         cols += ["PZ"]
+
+        # --- attach centralized metadata for gflip and levels (pre-slice) ---
+        try:
+            _meta = _levels_and_gflip_from_final(net_tbl)
+            net_tbl.attrs["gflip"] = _meta.get("gflip", {})
+            net_tbl.attrs["levels_summary"] = _meta.get("levels", {})
+            # create scalar level columns to avoid KeyError during slicing
+            import numpy as _np
+            _lv = _meta.get("levels", {}) if isinstance(_meta, dict) else {}
+            for _name in ["P1","P2","P3","N1","N2","N3","AG1","AG2","AG3"]:
+                _k = None
+                if isinstance(_lv.get(_name, {}), dict):
+                    _k = _lv.get(_name, {}).get("k", None)
+                net_tbl[_name] = float(_k) if _k is not None else _np.nan
+        except Exception:
+            pass
+
         net_tbl = net_tbl[cols].sort_values("K").reset_index(drop=True)
 
         if net_tbl.empty:
@@ -436,27 +453,27 @@ def build_final_sum_from_corr(
         cols += ["AG_1pct_M","NetGEX_1pct_M"]
     cols += ["PZ"]
 
-    base = base[cols].sort_values("K").reset_index(drop=True)
-    # attach metadata
+
+    # --- attach centralized metadata for gflip and levels (pre-slice) ---
     try:
         _meta = _levels_and_gflip_from_final(base)
         base.attrs["gflip"] = _meta.get("gflip", {})
         base.attrs["levels_summary"] = _meta.get("levels", {})
+        # create scalar level columns to avoid KeyError during slicing
+        import numpy as _np
+        _lv = _meta.get("levels", {}) if isinstance(_meta, dict) else {}
+        for _name in ["P1","P2","P3","N1","N2","N3","AG1","AG2","AG3"]:
+            _k = None
+            if isinstance(_lv.get(_name, {}), dict):
+                _k = _lv.get(_name, {}).get("k", None)
+            base[_name] = float(_k) if _k is not None else _np.nan
+    except Exception:
+        pass
 
-        # Emit scalar columns with level strikes for compatibility
-        try:
-            _lv = _meta.get("levels", {}) if isinstance(_meta, dict) else {}
-            for _name in ["P1","P2","P3","N1","N2","N3","AG1","AG2","AG3"]:
-                _k = None
-                if isinstance(_lv.get(_name, {}), dict):
-                    _k = _lv.get(_name, {}).get("k", None)
-                if _k is None:
-                    import numpy as _np
-                    base[_name] = _np.nan
-                else:
-                    base[_name] = float(_k)
-        except Exception:
-            pass
+    base = base[cols].sort_values("K").reset_index(drop=True)
+    # attach metadata
+    try:
+        _meta = _levels_and_gflip_from_final(base)
 
     except Exception:
         pass
