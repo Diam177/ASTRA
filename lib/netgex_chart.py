@@ -9,6 +9,17 @@ COLOR_POS = '#60A5E7'
 COLOR_NEG = '#D9493A'
 COLOR_PRICE = '#E4A339'
 
+
+def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
+    """Return g‑flip 'cross' from df_final.attrs if available."""
+    try:
+        meta = getattr(df_final, "attrs", {})
+        g = meta.get("gflip", {}) if isinstance(meta, dict) else {}
+        val = g.get("cross", None)
+        return float(val) if val is not None else None
+    except Exception:
+        return None
+
 def render_netgex_bars(
     df_final: _pd.DataFrame,
     ticker: str,
