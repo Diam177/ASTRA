@@ -46,7 +46,114 @@ class FinalTableConfig:
     day_low: Optional[float] = None
 
 
-# --------- helpers ---------
+
+# --------- centralized levels & g-flip computation ---------
+
+def _levels_and_gflip_from_final(df_final: pd.DataFrame) -> dict:
+    """
+    Compute G-Flip and top levels from a final-table DataFrame exactly as in netgex_chart/key_levels.
+    Returns a dict with:
+      {
+        "gflip": {"cross": float|None},
+        "levels": {
+            "P1":{"k":float,"val":float}, "P2":..., "P3":...,
+            "N1":..., "N2":..., "N3":...,
+            "AG1":..., "AG2":..., "AG3":...
+        }
+      }
+    """
+    out = {"gflip": {"cross": None}, "levels": {}}
+    if df_final is None or len(df_final)==0 or "K" not in df_final.columns:
+        return out
+    import numpy as _np
+    import pandas as _pd
+    # choose columns per existing UI logic
+    y_ng = "NetGEX_1pct_M" if "NetGEX_1pct_M" in df_final.columns else ("NetGEX_1pct" if "NetGEX_1pct" in df_final.columns else None)
+    y_ag = "AG_1pct_M" if "AG_1pct_M" in df_final.columns else ("AG_1pct" if "AG_1pct" in df_final.columns else None)
+    # spot for gflip selection
+    spot = None
+    try:
+        if "S" in df_final.columns:
+            spot = float(_pd.to_numeric(df_final["S"], errors="coerce").median())
+    except Exception:
+        spot = None
+
+    def _group_sum(df: _pd.DataFrame, col: str) -> _pd.DataFrame:
+        _g = (
+            df[["K", col]].copy()
+            .assign(K=lambda x: _pd.to_numeric(x["K"], errors="coerce"),
+                    V=lambda x: _pd.to_numeric(x[col], errors="coerce"))
+            .dropna()
+            .groupby("K", as_index=False)["V"].sum()
+            .sort_values("K")
+            .reset_index(drop=True)
+        )
+        return _g
+
+    # --- G-Flip identical to netgex_chart._compute_gamma_flip_from_table ---
+    if y_ng:
+        g = _group_sum(df_final, y_ng)
+        if not g.empty and len(g) >= 1:
+            Ks = g["K"].to_numpy(dtype=float)
+            Ys = g["V"].to_numpy(dtype=float)
+            if len(Ks) >= 2:
+                cand = [float(Ks[i]) for i, v in enumerate(Ys) if v == 0.0]
+                sign = _np.sign(Ys)
+                idx = _np.where(sign[:-1] * sign[1:] < 0)[0]
+                for i in idx:
+                    K0, K1 = Ks[i], Ks[i+1]
+                    y0, y1 = Ys[i], Ys[i+1]
+                    if y1 == y0:
+                        continue
+                    Kstar = K0 - y0 * (K1 - K0) / (y1 - y0)
+                    if min(K0, K1) <= Kstar <= max(K0, K1):
+                        cand.append(float(Kstar))
+                if cand:
+                    if spot is not None and _np.isfinite(spot):
+                        j = int(_np.argmin(_np.abs(_np.array(cand, dtype=float) - float(spot))))
+                        out["gflip"]["cross"] = float(cand[j])
+                    else:
+                        mid = 0.5 * (float(Ks[0]) + float(Ks[-1]))
+                        j = int(_np.argmin(_np.abs(_np.array(cand, dtype=float) - mid)))
+                        out["gflip"]["cross"] = float(cand[j])
+
+    # --- Levels: P1/N1 and secondary ones, and AG1/2/3 ---
+    levels = {}
+    if y_ng:
+        g_ng = _group_sum(df_final, y_ng)
+        if not g_ng.empty:
+            # P1 / N1
+            arr = g_ng["V"].to_numpy()
+            i_max = int(_np.nanargmax(arr)) if arr.size else None
+            i_min = int(_np.nanargmin(arr)) if arr.size else None
+            if i_max is not None:
+                levels["P1"] = {"k": float(g_ng.iloc[i_max]["K"]), "val": float(g_ng.iloc[i_max]["V"])}
+            if i_min is not None:
+                levels["N1"] = {"k": float(g_ng.iloc[i_min]["K"]), "val": float(g_ng.iloc[i_min]["V"])}
+            # P2/P3, N2/N3
+            pos = g_ng[g_ng["V"] > 0].sort_values("V", ascending=False).reset_index(drop=True)
+            neg = g_ng[g_ng["V"] < 0].sort_values("V", ascending=True).reset_index(drop=True)
+            if len(pos) >= 2:
+                levels["P2"] = {"k": float(pos.iloc[1]["K"]), "val": float(pos.iloc[1]["V"])}
+            if len(pos) >= 3:
+                levels["P3"] = {"k": float(pos.iloc[2]["K"]), "val": float(pos.iloc[2]["V"])}
+            if len(neg) >= 2:
+                levels["N2"] = {"k": float(neg.iloc[1]["K"]), "val": float(neg.iloc[1]["V"])}
+            if len(neg) >= 3:
+                levels["N3"] = {"k": float(neg.iloc[2]["K"]), "val": float(neg.iloc[2]["V"])}
+    if y_ag:
+        g_ag = _group_sum(df_final, y_ag)
+        if not g_ag.empty:
+            g_ag_sorted = g_ag.sort_values("V", ascending=False).reset_index(drop=True)
+            if len(g_ag_sorted) >= 1:
+                levels["AG1"] = {"k": float(g_ag_sorted.iloc[0]["K"]), "val": float(g_ag_sorted.iloc[0]["V"])}
+            if len(g_ag_sorted) >= 2:
+                levels["AG2"] = {"k": float(g_ag_sorted.iloc[1]["K"]), "val": float(g_ag_sorted.iloc[1]["V"])}
+            if len(g_ag_sorted) >= 3:
+                levels["AG3"] = {"k": float(g_ag_sorted.iloc[2]["K"]), "val": float(g_ag_sorted.iloc[2]["V"])}
+    out["levels"] = levels
+    return out
+
 
 def _window_strikes(df_corr: pd.DataFrame, exp: str, windows: Dict[str, np.ndarray]) -> np.ndarray:
     Ks = np.array(sorted(df_corr.loc[df_corr["exp"] == exp, "K"].unique()), dtype=float)
@@ -151,38 +258,6 @@ def build_final_tables_from_corr(
         net_tbl["call_vol"] = net_tbl["K"].map(call_vol_map).fillna(0.0)
         net_tbl["put_vol"]  = net_tbl["K"].map(put_vol_map).fillna(0.0)
 
-        if net_tbl.empty:
-            results[exp] = net_tbl
-            continue
-
-        # 2) strikes окна и контекст для PZ/ER
-        strikes_eval = _window_strikes(df_corr, exp, windows)
-        series_ctx_map = _series_ctx_from_corr(df_corr, exp)
-        if exp not in series_ctx_map:
-            # если не удалось собрать контекст — вернём без PZ/ER
-            net_tbl["PZ"] = 0.0
-            results[exp] = net_tbl
-            continue
-
-        # 3) PZ/ER по формуле проекта
-        pz = compute_power_zone(
-            S=float(np.nanmedian(df_corr.loc[df_corr["exp"]==exp, "S"].values)),
-            strikes_eval=strikes_eval,
-            all_series_ctx=[series_ctx_map[exp]],
-            day_high=cfg.day_high,
-            day_low=cfg.day_low,
-        )
-
-        # 4) привязка PZ/ER к таблице по K
-        pz_map   = {float(k): float(v) for k, v in zip(strikes_eval, pz)}
-        net_tbl["PZ"]      = net_tbl["K"].map(pz_map).fillna(0.0)
-        # enforce explicit spot override for ETF/Stocks if provided
-        if s_override is not None:
-            try:
-                net_tbl['S'] = float(s_override)
-            except Exception:
-                pass
-
         # Упорядочим колонки
         cols = ["exp","K","S"] + \
                ["call_oi","put_oi","call_vol","put_vol","dg1pct_call","dg1pct_put","AG_1pct","NetGEX_1pct"]
@@ -190,6 +265,19 @@ def build_final_tables_from_corr(
             cols += ["AG_1pct_M","NetGEX_1pct_M"]
         cols += ["PZ"]
         net_tbl = net_tbl[cols].sort_values("K").reset_index(drop=True)
+
+        if net_tbl.empty:
+            results[exp] = net_tbl
+            continue
+
+        # --- attach centralized metadata for gflip and levels ---
+        try:
+            _meta = _levels_and_gflip_from_final(net_tbl)
+            net_tbl.attrs["gflip"] = _meta.get("gflip", {})
+            net_tbl.attrs["levels_summary"] = _meta.get("levels", {})
+        except Exception:
+            # do not fail pipeline on metadata
+            pass
 
         results[exp] = net_tbl
 
@@ -330,7 +418,17 @@ def build_final_sum_from_corr(
     if "AG_1pct_M" in base.columns:
         cols += ["AG_1pct_M","NetGEX_1pct_M"]
     cols += ["PZ"]
-    return base[cols].sort_values("K").reset_index(drop=True)
+
+    base = base[cols].sort_values("K").reset_index(drop=True)
+    # attach metadata
+    try:
+        _meta = _levels_and_gflip_from_final(base)
+        base.attrs["gflip"] = _meta.get("gflip", {})
+        base.attrs["levels_summary"] = _meta.get("levels", {})
+    except Exception:
+        pass
+    return base
+
 
 def process_from_raw(
     raw_records: List[dict],
