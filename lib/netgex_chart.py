@@ -14,6 +14,29 @@ netgex_chart.py — бар‑чарт Net GEX для главной страни
 from __future__ import annotations
 from typing import Optional, Sequence
 import pandas as _pd
+
+def _get_gflip_from_final(df_final) -> float | None:
+    """Fetch G-Flip strictly from final_table: prefer df_final.attrs['gflip']['cross'],
+    fallback to df_final['G_FLIP'] if present. No local recomputation."""
+    v = None
+    try:
+        v = getattr(df_final, "attrs", {}).get("gflip", {}).get("cross", None)
+    except Exception:
+        v = None
+    if v is None:
+        try:
+            cols = getattr(df_final, "columns", [])
+            if isinstance(cols, (list, tuple)) or hasattr(cols, '__contains__'):
+                if "G_FLIP" in cols:
+                    s = _pd.to_numeric(df_final["G_FLIP"], errors="coerce")
+                    s = s.dropna()
+                    if len(s) > 0:
+                        v = float(s.iloc[0])
+        except Exception:
+            v = v
+    return v
+
+
 import streamlit as st
 import numpy as _np
 
