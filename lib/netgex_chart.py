@@ -6,7 +6,11 @@ import plotly.graph_objects as go
 import streamlit as st
 
 COLOR_POS = '#60A5E7'
+# alias for legacy name
+_COLOR_POS = COLOR_POS
 COLOR_NEG = '#D9493A'
+# alias for legacy name
+_COLOR_NEG = COLOR_NEG
 
 
 def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
