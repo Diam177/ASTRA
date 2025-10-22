@@ -38,6 +38,43 @@ def _get_gflip_from_final(df_final) -> float | None:
 
 
 import streamlit as st
+
+
+# --- Color constants (single source) ---
+try:
+    COLOR_POS
+except NameError:
+    COLOR_POS = '#60A5E7'
+try:
+    COLOR_NEG
+except NameError:
+    COLOR_NEG = '#D9493A'
+try:
+    COLOR_PRICE
+except NameError:
+    COLOR_PRICE = '#E4A339'
+try:
+    BG_COLOR
+except NameError:
+    try:
+        _bg = st.get_option('theme.backgroundColor')
+        if not _bg:
+            _base = (st.get_option('theme.base') or 'dark').lower()
+            _bg = '#0E1117' if _base == 'dark' else '#FFFFFF'
+    except Exception:
+        _bg = '#0E1117'
+    BG_COLOR = _bg
+try:
+    FG_COLOR
+except NameError:
+    FG_COLOR = '#e0e0e0'
+try:
+    GRID_COLOR
+except NameError:
+    GRID_COLOR = 'rgba(255,255,255,0.10)'
+
+
+
 import numpy as _np
 
 def _to_num(a: Sequence) -> _np.ndarray:
