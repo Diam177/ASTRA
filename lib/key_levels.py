@@ -225,11 +225,23 @@ def render_key_levels(
         level_map["PZ"] = _group_max_level(df_final, "PZ")
 
     # G‑Flip
-    spot = float(pd.to_numeric(df_final.get("S"), errors="coerce").median()) if "S" in cols else None
-    g_flip = _get_gflip_from_final(df_final)
-    if g_flip is not None and np.isfinite(g_flip):
-        if g_flip is not None:
-            level_map["G-Flip"] = float(g_flip)
+g_flip = _get_gflip_from_final(df_final)
+# snap to nearest listed strike in df_final
+try:
+    _Ks = (
+        pd.to_numeric(df_final["K"], errors="coerce")
+        .dropna()
+        .sort_values()
+        .to_numpy(dtype=float)
+    )
+    if g_flip is not None and np.isfinite(g_flip) and _Ks.size > 0:
+        j = int(np.argmin(np.abs(_Ks - float(g_flip))))
+        g_flip = float(_Ks[j])
+except Exception:
+    pass
+if g_flip is not None and np.isfinite(g_flip):
+    level_map["G-Flip"] = float(g_flip)
+
 
     # --- Additional secondary/tertiary levels ---
     attach_only_names = set()  # names that should not draw standalone lines
