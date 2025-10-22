@@ -388,7 +388,7 @@ def render_netgex_bars(
     # Тикер
     if ticker:
         fig.add_annotation(xref="paper", yref="paper", x=0.0, y=1.12, text=str(ticker),
-                           showarrow=False, font=dict(size=16, color=FG_COLOR), xanchor="left", yanchor="bottom")
+                           showarrow=False, font=dict(size=16, color=COLOR_PRICE), xanchor="left", yanchor="bottom")
 
     # Подписи страйков: все значения, горизонтально, шрифт 10
     tick_vals = x_idx.tolist()
