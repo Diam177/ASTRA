@@ -24,6 +24,28 @@ lib/key_levels.py — интрадей‑чарт «Key Levels» с горизо
 from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
+
+
+def _get_gflip_from_final(df_final: pd.DataFrame) -> Optional[float]:
+    """Fetch G-Flip strictly from final_table: prefer df_final.attrs['gflip']['cross'],
+    fallback to df_final['G_FLIP'] if present. No local recomputation."""
+    v: Optional[float] = None
+    try:
+        gattr = getattr(df_final, "attrs", {})
+        if isinstance(gattr, dict):
+            v = gattr.get("gflip", {}).get("cross", None)
+    except Exception:
+        v = None
+    if v is None and "G_FLIP" in getattr(df_final, "columns", []):
+        try:
+            s = pd.to_numeric(df_final["G_FLIP"], errors="coerce").dropna()
+            if not s.empty:
+                v = float(s.iloc[0])
+        except Exception:
+            pass
+    return v
+
+
 import pandas as pd
 import streamlit as st
 
@@ -106,38 +128,6 @@ def _group_min_level(df: pd.DataFrame, value_col: str) -> Optional[float]:
     i = int(np.nanargmin(g["V"].to_numpy()))
     return float(g.iloc[i]["K"])
 
-def _compute_gflip_piecewise(df_final: pd.DataFrame, y_col: str = "NetGEX_1pct", spot: Optional[float] = None) -> Optional[float]:
-    if df_final is None or df_final.empty or "K" not in df_final.columns or y_col not in df_final.columns:
-        return None
-    base = df_final[["K", y_col]].copy()
-    base["K"] = pd.to_numeric(base["K"], errors="coerce")
-    base[y_col] = pd.to_numeric(base[y_col], errors="coerce")
-    base = base.dropna()
-    if base.empty:
-        return None
-    g = base.groupby("K", as_index=False)[y_col].sum().sort_values("K").reset_index(drop=True)
-    Ks = g["K"].to_numpy(dtype=float)
-    Ys = g[y_col].to_numpy(dtype=float)
-    if len(Ks) < 2:
-        return None
-    cand: List[float] = [float(Ks[i]) for i, v in enumerate(Ys) if v == 0.0]
-    sign = np.sign(Ys)
-    idx = np.where(sign[:-1] * sign[1:] < 0)[0]
-    for i in idx:
-        K0, K1 = float(Ks[i]), float(Ks[i+1])
-        y0, y1 = float(Ys[i]), float(Ys[i+1])
-        if y1 != y0:
-            root = K0 - y0 * (K1 - K0) / (y1 - y0)
-            root = max(min(root, K1), K0) if K1 >= K0 else max(min(root, K0), K1)
-            cand.append(float(root))
-    if not cand:
-        return None
-    if spot is not None and np.isfinite(spot):
-        j = int(np.argmin(np.abs(np.array(cand) - float(spot))))
-        return float(cand[j])
-    mid = 0.5 * (float(Ks[0]) + float(Ks[-1]))
-    j = int(np.argmin(np.abs(np.array(cand) - mid)))
-    return float(cand[j])
 
 def _session_timerange(session_date: Optional[Union[str, pd.Timestamp]]) -> Tuple[pd.Timestamp, pd.Timestamp, pd.DatetimeIndex]:
     try:
@@ -236,8 +226,7 @@ def render_key_levels(
 
     # G‑Flip
     spot = float(pd.to_numeric(df_final.get("S"), errors="coerce").median()) if "S" in cols else None
-    if g_flip is None:
-        g_flip = g_flip  # keep incoming value; no local recomputation
+    g_flip = _get_gflip_from_final(df_final)
     if g_flip is not None and np.isfinite(g_flip):
         if g_flip is not None:
             level_map["G-Flip"] = float(g_flip)
