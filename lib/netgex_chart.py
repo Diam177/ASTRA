@@ -16,67 +16,19 @@ from typing import Optional, Sequence
 import pandas as _pd
 import streamlit as st
 import numpy as _np
+
 def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
     """
-    G-Flip (K*): страйк, где агрегированный Net GEX(K) меняет знак.
-    Метод: кусочно-линейная интерполяция между соседними страйками и поиск корня.
-    K* = K0 - y0*(K1-K0)/(y1-y0)
-    Если несколько корней — выбираем ближайший к spot (если известен), иначе к середине диапазона.
+    Delegates to gflip precomputed in final_table. Kept for backward compatibility.
     """
-    import pandas as _pd
-    if df_final is None or len(df_final) == 0 or "K" not in df_final.columns or y_col not in df_final.columns:
+    try:
+        meta = getattr(df_final, "attrs", {})
+        g = meta.get("gflip", {}) if isinstance(meta, dict) else {}
+        val = g.get("cross", None)
+        return float(val) if val is not None else None
+    except Exception:
         return None
-    base = df_final.copy()
-    base["K"] = _pd.to_numeric(base["K"], errors="coerce")
-    base[y_col] = _pd.to_numeric(base[y_col], errors="coerce")
-    base = base.dropna(subset=["K", y_col])
-    if base.empty:
-        return None
-    g = base.groupby("K", as_index=False)[y_col].sum().sort_values("K").reset_index(drop=True)
-    Ks = g["K"].to_numpy(dtype=float)
-    Ys = g[y_col].to_numpy(dtype=float)
-    if len(Ks) < 2:
-        return None
-    # прямые нули и смена знака
-    cand = [float(Ks[i]) for i,v in enumerate(Ys) if v == 0.0]
-    sign = _np.sign(Ys)
-    idx = _np.where(sign[:-1]*sign[1:] < 0)[0]
-    for i in idx:
-        K0, K1 = Ks[i], Ks[i+1]
-        y0, y1 = Ys[i], Ys[i+1]
-        if y1 == y0: 
-            continue
-        Kstar = K0 - y0*(K1-K0)/(y1-y0)
-        if min(K0,K1) <= Kstar <= max(K0,K1):
-            cand.append(float(Kstar))
-    if not cand:
-        return None
-    if spot is not None and _np.isfinite(spot):
-        j = int(_np.argmin(_np.abs(_np.array(cand) - float(spot))))
-        return float(cand[j])
-    mid = 0.5*(float(Ks[0]) + float(Ks[-1]))
-    j = int(_np.argmin(_np.abs(_np.array(cand) - mid)))
-    return float(cand[j])
 
-try:
-    import plotly.graph_objects as go
-except Exception as e:
-    raise RuntimeError("Требуется пакет 'plotly' (plotly>=5.22.0)") from e
-
-# --- Цвета/оформление ---
-COLOR_NEG = '#D9493A'    # красный
-COLOR_POS = '#60A5E7'    # бирюзовый
-COLOR_PRICE = '#E4A339'  # оранжевая линия цены
-try:
-    _bg = st.get_option('theme.backgroundColor')
-    if not _bg:
-        _base = (st.get_option('theme.base') or 'dark').lower()
-        _bg = '#0E1117' if _base == 'dark' else '#FFFFFF'
-except Exception:
-    _bg = '#0E1117'
-BG_COLOR = _bg
-FG_COLOR = '#e0e0e0'
-GRID_COLOR = 'rgba(255,255,255,0.10)'
 
 def _to_num(a: Sequence) -> _np.ndarray:
     return _np.array(_pd.to_numeric(a, errors='coerce'), dtype=float)
@@ -172,7 +124,7 @@ def render_netgex_bars(
 
     Ks = df["K"].to_numpy(dtype=float)
     Ys = df[y_col].to_numpy(dtype=float)
-    g_flip = _compute_gamma_flip_from_table(df, y_col, spot)
+    g_flip = _compute_gamma_flip_from_table(df_final, y_col, spot)
     
     # Последовательные позиции без "пустых" промежутков между страйками
     x_idx = _np.arange(len(Ks), dtype=float)
