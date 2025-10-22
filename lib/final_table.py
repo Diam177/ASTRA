@@ -282,7 +282,7 @@ def build_final_tables_from_corr(
             pass
 
         sel = [c for c in cols if c in net_tbl.columns]
-net_tbl = net_tbl[sel].sort_values("K").reset_index(drop=True)
+        net_tbl = net_tbl[sel].sort_values("K").reset_index(drop=True)
 
         if net_tbl.empty:
             results[exp] = net_tbl
@@ -472,7 +472,7 @@ def build_final_sum_from_corr(
         pass
 
     sel = [c for c in cols if c in base.columns]
-base = base[sel].sort_values("K").reset_index(drop=True)
+    base = base[sel].sort_values("K").reset_index(drop=True)
     # attach metadata
     try:
         _meta = _levels_and_gflip_from_final(base)
