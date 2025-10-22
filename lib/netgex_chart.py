@@ -6,9 +6,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 COLOR_POS = '#60A5E7'
-COLOR_POS = COLOR_POS
 COLOR_NEG = '#D9493A'
-COLOR_NEG = COLOR_NEG
+COLOR_PRICE = '#FFFFFF'  # match key_levels price color
 
 
 def _compute_gamma_flip_from_table(df_final, y_col: str, spot: float | None) -> float | None:
