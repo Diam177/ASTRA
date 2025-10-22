@@ -295,7 +295,7 @@ def _st_hide_df(*args, **kwargs):
 def _st_hide_subheader(*args, **kwargs):
     # no-op: suppress section headers for tables
     return None
-from lib.netgex_chart import render_netgex_bars, _compute_gamma_flip_from_table
+from lib.netgex_chart import render_netgex_bars
 from lib.key_levels import render_key_levels
 
 # Project imports
@@ -985,7 +985,7 @@ if raw_records:
                             # Подбор столбца NetGEX и spot для G-Flip
                             _ycol_m = "NetGEX_1pct_M" if ("NetGEX_1pct_M" in df_final_multi.columns) else ("NetGEX_1pct" if "NetGEX_1pct" in df_final_multi.columns else None)
                             _spot_m = float(pd.to_numeric(df_final_multi.get("S"), errors="coerce").median()) if ("S" in df_final_multi.columns) else None
-                            _gflip_m = _compute_gamma_flip_from_table(df_final_multi, y_col=_ycol_m or "NetGEX_1pct", spot=_spot_m)
+                            _gflip_m = float((getattr(df_final_multi,'attrs',{}).get('gflip',{}) if 'df_final_multi' in locals() else getattr(df_final,'attrs',{}).get('gflip',{})).get('cross', None))
                             # Привязываем G-Flip к ближайшему доступному страйку из df_final_multi['K']
                             try:
                                 _Ks_m = pd.to_numeric(df_final_multi.get("K"), errors="coerce").dropna().tolist() if ("K" in df_final_multi.columns) else []
@@ -1065,7 +1065,7 @@ if raw_records:
                                     # Определяем столбец NetGEX и spot так же, как в netgex_chart
                                     _ycol = "NetGEX_1pct_M" if "NetGEX_1pct_M" in df_final.columns else ("NetGEX_1pct" if "NetGEX_1pct" in df_final.columns else None)
                                     _spot_for_flip = float(pd.to_numeric(df_final.get("S"), errors="coerce").median()) if "S" in df_final.columns else None
-                                    _gflip_val = _compute_gamma_flip_from_table(df_final, y_col=_ycol or "NetGEX_1pct", spot=_spot_for_flip)
+                                    _gflip_val = float((getattr(df_final_multi,'attrs',{}).get('gflip',{}) if 'df_final_multi' in locals() else getattr(df_final,'attrs',{}).get('gflip',{})).get('cross', None))
                                     
                                     # --- Snap G-Flip to nearest available strike from df_final['K'] (no math rounding) ---
                                     try:
