@@ -321,7 +321,7 @@ def render_key_levels(
         plot_bgcolor=BACKGROUND,
         margin=dict(l=60, r=110, t=40, b=90),
         height=1000,
-        legend=dict(orientation="h", yanchor="middle", y=1.02, xanchor="left", x=0.0, font=dict(size=10)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0.0, font=dict(size=10)),
     )
     fig.update_yaxes(
         tickfont=dict(color=AXIS_GRAY, size=10),
@@ -592,13 +592,42 @@ def render_key_levels(
                     legendrank=LEGEND_RANK.get(display_name_map.get(_orig, _orig), 999),
                 ))
         # Сводная подпись справа (над линией, у правого края)
+
+                # Shaded band for G-Flip: from midpoints to neighbor strikes
+                if "G-Flip" in labels_sorted:
+                    try:
+                        import numpy as _np
+                        import pandas as _pd
+                        _Ks_series = _pd.to_numeric(df_final.get("K"), errors="coerce") if "K" in df_final.columns else None
+                        _Ks = sorted(set(_Ks_series.dropna().astype(float).tolist())) if _Ks_series is not None else []
+                        if _Ks:
+                            _y = float(y)
+                            _idx = _Ks.index(min(_Ks, key=lambda v: abs(v - _y)))
+                            _k_lo = _Ks[_idx-1] if _idx-1 >= 0 else None
+                            _k_hi = _Ks[_idx+1] if _idx+1 < len(_Ks) else None
+                            _d_list = [_Ks[j+1]-_Ks[j] for j in range(len(_Ks)-1)]
+                            _dK = float(_np.median(_d_list)) if _d_list else 0.0
+                            _y0 = (_y + (_k_lo if _k_lo is not None else _y - _dK)) / 2.0
+                            _y1 = (_y + (_k_hi if _k_hi is not None else _y + _dK)) / 2.0
+                            if _y1 > _y0:
+                                fig.add_shape(
+                                    type="rect",
+                                    xref="paper", x0=0.0, x1=1.0,
+                                    yref="y", y0=float(_y0), y1=float(_y1),
+                                    line=dict(width=0),
+                                    fillcolor=COLOR_GFLIP,
+                                    opacity=0.2,
+                                    layer="below",
+                                )
+                    except Exception:
+                        pass
         fig.add_annotation(
             x=1.0, xref="paper",
             y=float(y), yref="y",
             text=" + ".join([display_name_map.get(n,n) for n in (labels_sorted if ('attach_only_names' not in globals() or not all((n in attach_only_names) for n in labels_sorted)) else [])]),
             showarrow=False,
-            xanchor="right", yanchor="middle",
-            yshift=0,
+            xanchor="right", yanchor="bottom",
+            yshift=6,
             align="right",
             font=dict(size=10, color="#FFFFFF"),
             bgcolor="rgba(0,0,0,0.35)",
@@ -612,7 +641,7 @@ def render_key_levels(
     fig.add_annotation(
         x=0, xref="paper", y=1.12, yref="paper",
         text=str(ticker),
-        showarrow=False, xanchor="left", yanchor="middle",
+        showarrow=False, xanchor="left", yanchor="bottom",
         font=dict(size=12, color="#FFFFFF"),
     )
 
@@ -620,7 +649,7 @@ def render_key_levels(
     fig.add_annotation(
         x=0.5, xref="paper", y=-0.08, yref="paper",
         text=_format_date_for_footer(pd.to_datetime(x_left)),
-        showarrow=False, xanchor="center", yanchor="middle",
+        showarrow=False, xanchor="center", yanchor="top",
         font=dict(size=10, color="#FFFFFF"),
     )
 
@@ -642,7 +671,7 @@ def render_key_levels(
 
     fig.add_annotation(
         xref='paper', yref='paper',
-        x=0.0, y=1.0, xanchor='left', yanchor="middle",
+        x=0.0, y=1.0, xanchor='left', yanchor='top',
         text=str(ticker), showarrow=False,
         font=dict(size=14)
     )
