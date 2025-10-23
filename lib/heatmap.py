@@ -334,7 +334,8 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ,
-    zsmooth="best"),
+    zsmooth="best",
+    showlegend=False),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -355,7 +356,8 @@ def build_heatmap(
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
             ,
-    zsmooth="best")
+    zsmooth="best",
+    showlegend=False)
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -418,7 +420,7 @@ def build_heatmap(
                     line=dict(width=2.4),
                     name="Price",
                     hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
-                    showlegend=True,
+                    showlegend=False,
                 ))
 
             # VWAP
@@ -442,7 +444,7 @@ def build_heatmap(
                     line=dict(width=1.0),
                     name="VWAP",
                     hovertemplate="Time: %{x|%H:%M}<br>VWAP: %{y:.2f}<extra></extra>",
-                    showlegend=True,
+                    showlegend=False,
                 ))
 
         # --- Left y-axis ticks at all levels that have parameters ---
@@ -809,7 +811,8 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
                 gflip = None
         if gflip is not None:
             fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
-        st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "scrollZoom": False})
+        fig.update_layout(showlegend=False)
+st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "staticPlot": True})
     except Exception as e:
         import traceback
         st.error(f"Heatmap exception: {type(e).__name__}: {e}")
