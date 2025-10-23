@@ -534,3 +534,281 @@ def build_heatmap(
         pass
 
     return fig
+
+# ===== astra: heatmap methodology v1 =====
+import numpy as _np
+import pandas as _pd
+import plotly.graph_objects as go
+import streamlit as st
+import math as _math
+
+def _np_clip01(x):
+    return _np.minimum(1.0, _np.maximum(0.0, x))
+
+def _median_diff_unique(K):
+    try:
+        v = _np.array(sorted(set(_pd.to_numeric(K, errors="coerce").dropna().astype(float).tolist())), dtype=float)
+        if v.size < 2:
+            return float("nan")
+        d = _np.diff(v)
+        return float(_np.median(d)) if d.size else float("nan")
+    except Exception:
+        return float("nan")
+
+def _gaussian_smooth_by_K(df: _pd.DataFrame, cols, h):
+    if not _np.isfinite(h) or h <= 0:
+        return df.copy()
+    out = df.copy()
+    K = _pd.to_numeric(df.get("K"), errors="coerce").astype(float)
+    mask = K.notna()
+    Kv = K[mask].to_numpy()
+    if Kv.size == 0:
+        return out
+    for c in cols:
+        if c not in df.columns:
+            continue
+        x = _pd.to_numeric(df[c], errors="coerce")
+        xv = x[mask].to_numpy(dtype=float)
+        if xv.size == 0:
+            out[c] = 0.0
+            continue
+        out_vals = _np.empty_like(xv)
+        for i, k0 in enumerate(Kv):
+            d = (Kv - k0) / h
+            w = _np.exp(-0.5 * d * d)
+            s = _np.sum(w * xv)
+            W = _np.sum(w)
+            out_vals[i] = s / W if W > 0 else 0.0
+        y = _pd.Series(index=K.index, dtype=float)
+        y.loc[mask] = out_vals
+        y.loc[~mask] = _np.nan
+        out[c] = y
+    return out
+
+def _ridge_proj_y_on_X(y: _pd.Series, X: _pd.DataFrame, lam=1e-6):
+    try:
+        Y = _pd.to_numeric(y, errors="coerce").astype(float).fillna(0.0).to_numpy()[:, None]
+        Xn = _pd.DataFrame({c: _pd.to_numeric(X[c], errors="coerce").astype(float).fillna(0.0) for c in X.columns})
+        Xv = Xn.to_numpy(float)
+        XtX = Xv.T @ Xv
+        XtY = Xv.T @ Y
+        XtX_reg = XtX + lam * _np.eye(XtX.shape[0])
+        coef = _np.linalg.solve(XtX_reg, XtY)
+        y_hat = (Xv @ coef).ravel()
+        resid = (Y.ravel() - y_hat)
+        return resid
+    except Exception:
+        return _pd.to_numeric(y, errors="coerce").astype(float).fillna(0.0).to_numpy()
+
+def _rank_top_k(vals: _pd.Series, side="pos", k=3):
+    v = _pd.to_numeric(vals, errors="coerce").astype(float)
+    if side == "pos":
+        idx = v[v > 0].nlargest(k).index.tolist()
+    else:
+        idx = v[v < 0].nsmallest(k).index.tolist()
+    return idx
+
+def _component_scores(df: _pd.DataFrame, gflip=None, ticker_hint=None, rv_z=0.0):
+    NG = _pd.to_numeric(df.get("NetGEX_1pct_M", df.get("NetGEX_1pct")/1e6), errors="coerce").astype(float).fillna(0.0)
+    AG = _pd.to_numeric(df.get("AG_1pct_M", df.get("AG_1pct")), errors="coerce").astype(float).fillna(0.0)
+    PZ = _pd.to_numeric(df.get("PZ"), errors="coerce").astype(float).fillna(0.0)
+    COI = _pd.to_numeric(df.get("call_oi"), errors="coerce").astype(float).fillna(0.0)
+    POI = _pd.to_numeric(df.get("put_oi"), errors="coerce").astype(float).fillna(0.0)
+    CV = _pd.to_numeric(df.get("call_vol"), errors="coerce").astype(float).fillna(0.0)
+    PV = _pd.to_numeric(df.get("put_vol"), errors="coerce").astype(float).fillna(0.0)
+
+    K = _pd.to_numeric(df.get("K"), errors="coerce").astype(float)
+    dK = _median_diff_unique(K)
+    sm = _gaussian_smooth_by_K(_pd.DataFrame(dict(K=K, NG=NG, AG=AG, PZ=PZ, COI=COI, POI=POI, CV=CV, PV=PV)), 
+                               cols=["NG","AG","PZ","COI","POI","CV","PV"], h=dK if _np.isfinite(dK) else 0.0)
+    NG, AG, PZ, COI, POI, CV, PV = (sm[c] for c in ["NG","AG","PZ","COI","POI","CV","PV"])
+
+    AG_resid = _ridge_proj_y_on_X(AG, _pd.DataFrame({"absNG": _np.abs(NG), "PZ": PZ}))
+    PZ_resid = _ridge_proj_y_on_X(PZ, _pd.DataFrame({"absNG": _np.abs(NG), "AG": AG}))
+    AG_resid = _pd.Series(AG_resid, index=df.index)
+    PZ_resid = _pd.Series(PZ_resid, index=df.index)
+
+    Ppos = _rank_top_k(NG, "pos", 3)
+    Pneg = _rank_top_k(NG, "neg", 3)
+
+    Pmax = float(_np.nanmax(_np.where(NG.values>0, NG.values, _np.nan))) if _np.any(NG.values>0) else 0.0
+    Nmax = float(_np.nanmax(_np.where(NG.values<0, -NG.values, _np.nan))) if _np.any(NG.values<0) else 0.0
+    s_pos = _np.where(NG.values>0, NG.values/(Pmax+1e-12), 0.0)
+    s_neg = _np.where(NG.values<0, -NG.values/(Nmax+1e-12), 0.0)
+    p = 0.8
+    r = _np.ones_like(s_pos)
+    r1, r2, r3 = 0.50, 0.25, 0.15
+    for j, idxs in enumerate([Ppos[:1], Ppos[1:2], Ppos[2:3]]):
+        for ix in idxs:
+            r[ix] += [r1, r2, r3][j]
+    for j, idxs in enumerate([Pneg[:1], Pneg[1:2], Pneg[2:3]]):
+        for ix in idxs:
+            r[ix] += [r1, r2, r3][j]
+    z_minus = 1.0 + max(rv_z, 0.0)*0.2
+    z = _np.where(NG.values<0, z_minus, 1.0)
+    NG_score = z * _np.power(s_pos + s_neg, p) * r
+
+    def pos_norm(x):
+        xv = _np.maximum(_pd.to_numeric(x, errors="coerce").astype(float).fillna(0.0).values, 0.0)
+        m = float(xv.max()) if xv.size else 0.0
+        return (xv/(m+1e-12))**0.8 if m>0 else xv*0.0
+    AG_s = pos_norm(AG_resid)
+    PZ_s = pos_norm(PZ_resid)
+
+    def apply_boost(base, series):
+        s = _pd.to_numeric(series, errors="coerce").astype(float)
+        idx = s.nlargest(3).index.tolist()
+        out = base.copy()
+        if len(idx)>0: out[idx[0]] *= (1+0.30)
+        if len(idx)>1: out[idx[1]] *= (1+0.15)
+        if len(idx)>2: out[idx[2]] *= (1+0.15)
+        return out
+    AG_score = apply_boost(AG_s, _pd.Series(AG_resid, index=df.index))
+    PZ_score = apply_boost(PZ_s, _pd.Series(PZ_resid, index=df.index))
+
+    def log_norm(x):
+        x = _pd.to_numeric(x, errors="coerce").astype(float).fillna(0.0)
+        y = _np.log1p(_np.maximum(x.values, 0.0))
+        m = float(y.max()) if y.size else 0.0
+        return y/(m+1e-12) if m>0 else y*0.0
+    COI_n, POI_n = log_norm(COI), log_norm(POI)
+    CV_n, PV_n = log_norm(CV), log_norm(PV)
+
+    if gflip is not None and _np.isfinite(gflip):
+        zone = _np.sign(K.values - float(gflip))
+    else:
+        zone = _np.zeros_like(K.values)
+    w_call_pos, w_put_pos = 1.0, 0.6
+    w_call_neg, w_put_neg = 0.6, 1.0
+    w_call = _np.where(zone>=0, w_call_pos, w_call_neg)
+    w_put = _np.where(zone>=0, w_put_pos, w_put_neg)
+    OI_score  = w_call*COI_n + w_put*POI_n
+    VOL_score = w_call*CV_n  + w_put*PV_n
+
+    if gflip is not None and _np.isfinite(gflip) and _np.isfinite(dK) and dK>0:
+        dist = (K.values - float(gflip))/(2.0*dK)
+        G0 = _np.exp(-0.5*dist*dist)
+        try:
+            order = _np.argsort(_np.abs(K.values - float(gflip)))[:5]
+            grad = _np.gradient(NG.values[order], K.values[order])
+            grad_amp = float(_np.nanmax(_np.abs(grad)))
+        except Exception:
+            grad_amp = 0.0
+        try:
+            all_grad = _np.gradient(NG.values, K.values)
+            q90 = float(_np.nanpercentile(_np.abs(all_grad), 90.0))
+        except Exception:
+            q90 = 0.0
+        mult = 1.0 + 0.5*max(grad_amp/(q90+1e-12)-1.0, 0.0) if q90>0 else 1.0
+        try:
+            S = float(_pd.to_numeric(df.get("S"), errors="coerce").dropna().median())
+            spot_mult = _math.exp(-abs(S - float(gflip)) / (3.0*(dK if dK>0 else 1.0)))
+        except Exception:
+            spot_mult = 1.0
+        Gflip_score = G0 * mult * spot_mult
+    else:
+        Gflip_score = _np.zeros_like(K.values, dtype=float)
+
+    return dict(NG_score=NG_score, AG_score=AG_score, PZ_score=PZ_score,
+                OI_score=OI_score, VOL_score=VOL_score, Gflip_score=Gflip_score,
+                dK=dK)
+
+def _regime_weights(ticker:str, share_0dte:float, rv_z:float):
+    if isinstance(ticker, str) and ticker.upper().endswith("SPY"):
+        w = dict(NG=0.42, AG=0.18, PZ=0.18, OI=0.10, VOL=0.07, GFLIP=0.05)
+        if (share_0dte is not None and share_0dte>=0.5) or (rv_z is not None and rv_z>=1.0):
+            w["NG"]+=0.04; w["VOL"]+=0.02; w["GFLIP"]+=0.02; w["OI"]-=0.02; w["AG"]-=0.02
+    else:
+        w = dict(NG=0.50, AG=0.14, PZ=0.14, OI=0.06, VOL=0.08, GFLIP=0.08)
+        if (share_0dte is not None and share_0dte>=0.5) or (rv_z is not None and rv_z>=1.0):
+            w["NG"]+=0.05; w["VOL"]+=0.03; w["GFLIP"]+=0.02; w["OI"]-=0.03; w["AG"]-=0.03
+    s = sum(w.values())
+    for k in w: w[k] /= s if s>0 else 1.0
+    return w
+
+def _concave_aggregate(scores:dict, weights:dict):
+    NG_s = _np_clip01(scores["NG_score"])
+    AG_s = _np_clip01(scores["AG_score"])
+    PZ_s = _np_clip01(scores["PZ_score"])
+    OI_s = _np_clip01(scores["OI_score"])
+    VOL_s= _np_clip01(scores["VOL_score"])
+    GF_s = _np_clip01(scores["Gflip_score"])
+    w = weights
+    one_minus = (1 - w["NG"]*NG_s) * (1 - w["AG"]*AG_s) * (1 - w["PZ"]*PZ_s) * (1 - w["GFLIP"]*GF_s) * (1 - (w["OI"]+w["VOL"])*_np_clip01(0.5*OI_s + 0.5*VOL_s))
+    H_raw = 1 - one_minus
+    return H_raw, dict(NG_s=NG_s, AG_s=AG_s, PZ_s=PZ_s, OI_s=OI_s, VOL_s=VOL_s, Gflip_s=GF_s)
+
+def _robust_norm(H_raw):
+    if H_raw.size == 0:
+        return H_raw
+    q05 = float(_np.nanpercentile(H_raw, 5.0))
+    q95 = float(_np.nanpercentile(H_raw, 95.0))
+    H = (H_raw - q05) / ( (q95 - q05) + 1e-12 )
+    return _np_clip01(H)
+
+def compute_heat_scores(df_final:_pd.DataFrame, gflip=None, ticker_hint=None, rv_z:float=0.0, share_0dte:float=None) -> _pd.DataFrame:
+    if df_final is None or len(df_final)==0:
+        return _pd.DataFrame(columns=["K","H","H_raw","NG_s","AG_s","PZ_s","OI_s","VOL_s","Gflip_s"])
+    if gflip is None:
+        try:
+            gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
+            if gflip is None and "G_FLIP" in df_final.columns:
+                gflip = float(_pd.to_numeric(df_final["G_FLIP"], errors="coerce").dropna().iloc[0])
+        except Exception:
+            gflip = None
+    if ticker_hint is None:
+        try:
+            ticker_hint = str(st.session_state.get("ticker","")).upper()
+        except Exception:
+            ticker_hint = ""
+    scores = _component_scores(df_final, gflip=gflip, ticker_hint=ticker_hint, rv_z=rv_z)
+    if share_0dte is None:
+        try:
+            share_0dte = float(getattr(df_final, "attrs", {}).get("mode", {}).get("share_0DTE", 0.0))
+        except Exception:
+            share_0dte = 0.0
+    w = _regime_weights(ticker_hint or "", share_0dte=share_0dte, rv_z=rv_z)
+    H_raw, parts = _concave_aggregate(scores, w)
+    H = _robust_norm(H_raw.copy())
+    out = _pd.DataFrame({
+        "K": _pd.to_numeric(df_final.get("K"), errors="coerce").astype(float),
+        "H": H,
+        "H_raw": H_raw,
+        "NG_s": parts["NG_s"],
+        "AG_s": parts["AG_s"],
+        "PZ_s": parts["PZ_s"],
+        "OI_s": parts["OI_s"],
+        "VOL_s": parts["VOL_s"],
+        "Gflip_s": parts["Gflip_s"],
+    })
+    return out.sort_values("K").reset_index(drop=True)
+
+def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=None, spot=None):
+    try:
+        rv_z = 0.0  # TODO: populate if доступно
+        scores = compute_heat_scores(df_final, gflip=gflip, rv_z=rv_z)
+        if scores.empty:
+            st.info("Нет данных для heatmap.")
+            return
+        K = scores["K"].to_numpy()
+        H = scores["H"].to_numpy()
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=H, y=K, orientation="h",
+            marker=dict(color=H, colorscale="Turbo"),
+            showlegend=False, name="Heat"
+        ))
+        fig.update_yaxes(title="Strike K")
+        fig.update_xaxes(title="Heat", range=[0,1])
+        if gflip is None:
+            try:
+                gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
+            except Exception:
+                gflip = None
+        if gflip is not None:
+            fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
+        st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "scrollZoom": False})
+    except Exception as e:
+        import traceback
+        st.error(f"Heatmap exception: {type(e).__name__}: {e}")
+        st.code(traceback.format_exc())
