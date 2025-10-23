@@ -1065,7 +1065,9 @@ if raw_records:
                                     # Определяем столбец NetGEX и spot так же, как в netgex_chart
                                     _ycol = "NetGEX_1pct_M" if "NetGEX_1pct_M" in df_final.columns else ("NetGEX_1pct" if "NetGEX_1pct" in df_final.columns else None)
                                     _spot_for_flip = float(pd.to_numeric(df_final.get("S"), errors="coerce").median()) if "S" in df_final.columns else None
-                                    _gflip_val = float((getattr(df_final_multi,'attrs',{}).get('gflip',{}) if 'df_final_multi' in locals() else getattr(df_final,'attrs',{}).get('gflip',{})).get('cross', None))
+                                    _src_df = df_final_multi if 'df_final_multi' in locals() else df_final
+                                    _gflip_raw = (((getattr(_src_df, 'attrs', {}) or {}).get('gflip') or {}).get('cross'))
+                                    _gflip_val = float(_gflip_raw) if _gflip_raw is not None else None
                                     
                                     # --- Snap G-Flip to nearest available strike from df_final['K'] (no math rounding) ---
                                     try:
