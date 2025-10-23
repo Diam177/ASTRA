@@ -639,9 +639,9 @@ def render_key_levels(
 
     # Заголовок (тикер)
     fig.add_annotation(
-        x=0, xref="paper", y=1.12, yref="paper",
+        x=0, xref="paper", y=float(y), yref="paper",
         text=str(ticker),
-        showarrow=False, xanchor="left", yanchor="bottom",
+        showarrow=False, xanchor="left", yanchor=\"middle\",
         font=dict(size=12, color="#FFFFFF"),
     )
 
@@ -671,7 +671,7 @@ def render_key_levels(
 
     fig.add_annotation(
         xref='paper', yref='paper',
-        x=0.0, y=1.0, xanchor='left', yanchor='top',
+        x=0.0, y=float(y), xanchor='left', yanchor=\"middle\",
         text=str(ticker), showarrow=False,
         font=dict(size=14)
     )
