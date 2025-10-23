@@ -333,7 +333,8 @@ def build_heatmap(
                 colorscale="Viridis",
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
-            ),
+            ,
+    zsmooth="best"),
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -353,7 +354,8 @@ def build_heatmap(
                 colorscale="Viridis",
                 zmin=zmin, zmax=zmax,
                 colorbar=dict(title="Level strength", ticksuffix="")
-            )
+            ,
+    zsmooth="best")
         ])
         fig.update_layout(
             title=title or "Level Strength Heatmap",
@@ -413,7 +415,7 @@ def build_heatmap(
                 fig.add_trace(go.Scatter(
                     x=pdf["time"], y=pd.to_numeric(pdf[col_price], errors="coerce"),
                     mode="lines",
-                    line=dict(width=1.2),
+                    line=dict(width=2.4),
                     name="Price",
                     hovertemplate="Time: %{x|%H:%M}<br>Price: %{y:.2f}<extra></extra>",
                     showlegend=True,
