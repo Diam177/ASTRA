@@ -26,6 +26,22 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 
 
+def _snap_to_nearest_strike(Ks: Iterable[float], gflip: float) -> Optional[float]:
+    """Return nearest strike to gflip from list/iterable Ks. No rounding, pure nearest neighbor.
+    Returns None if Ks is empty or gflip is not finite."""
+    try:
+        if gflip is None or not np.isfinite(gflip):
+            return None
+        arr = np.array([float(x) for x in Ks if x is not None and np.isfinite(x)], dtype=float)
+        if arr.size == 0:
+            return None
+        idx = int(np.argmin(np.abs(arr - float(gflip))))
+        return float(arr[idx])
+    except Exception:
+        return None
+
+
+
 def _get_gflip_from_final(df_final: pd.DataFrame) -> Optional[float]:
     """Fetch G-Flip strictly from final_table: prefer df_final.attrs['gflip']['cross'],
     fallback to df_final['G_FLIP'] if present. No local recomputation."""
@@ -225,12 +241,17 @@ def render_key_levels(
         level_map["PZ"] = _group_max_level(df_final, "PZ")
 
     # G‑Flip
-    spot = float(pd.to_numeric(df_final.get("S"), errors="coerce").median()) if "S" in cols else None
-    g_flip = _get_gflip_from_final(df_final)
+    gflip_display_int = None
     if g_flip is not None and np.isfinite(g_flip):
-        if g_flip is not None:
-            level_map["G-Flip"] = float(g_flip)
-
+        try:
+            _Ks_series = pd.to_numeric(df_final.get("K"), errors="coerce") if "K" in df_final.columns else None
+            Ks = sorted(set(_Ks_series.dropna().astype(float).tolist())) if _Ks_series is not None else []
+        except Exception:
+            Ks = []
+        k_strike = _snap_to_nearest_strike(Ks, float(g_flip))
+        if k_strike is not None and np.isfinite(k_strike):
+            level_map["G-Flip"] = float(k_strike)
+            gflip_display_int = int(round(float(g_flip)))
     # --- Additional secondary/tertiary levels ---
     attach_only_names = set()  # names that should not draw standalone lines
 
@@ -558,7 +579,10 @@ def render_key_levels(
             for _orig in labels_for_lines:
                 _disp = display_name_map.get(_orig, _orig)
                 _clr = COLOR_GFLIP if _orig == 'G-Flip' else color_map.get(_orig, color)
-                _nm = f"{_disp} ({float(y):g})" if _orig not in ['Price','VWAP'] else _disp
+                if _orig == 'G-Flip' and 'gflip_display_int' in locals() and gflip_display_int is not None:
+                    _nm = f"{_disp} ({gflip_display_int:d})"
+                else:
+                    _nm = f"{_disp} ({float(y):g})" if _orig not in ['Price','VWAP'] else _disp
                 _dash = 'dot' if _orig in {'AG2','AG3','P2','P3','N2','N3'} else ('dash' if _orig in {'AG','PZ','G-Flip'} else 'solid')
                 fig.add_trace(go.Scatter(
                     x=[x_left, x_right], y=[float(y), float(y)],
