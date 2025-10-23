@@ -321,7 +321,7 @@ def render_key_levels(
         plot_bgcolor=BACKGROUND,
         margin=dict(l=60, r=110, t=40, b=90),
         height=1000,
-        legend=dict(orientation="h", yanchor=\"middle\", y=1.02, xanchor="left", x=0.0, font=dict(size=10)),
+        legend=dict(orientation="h", yanchor="middle", y=1.02, xanchor="left", x=0.0, font=dict(size=10)),
     )
     fig.update_yaxes(
         tickfont=dict(color=AXIS_GRAY, size=10),
@@ -597,7 +597,7 @@ def render_key_levels(
             y=float(y), yref="y",
             text=" + ".join([display_name_map.get(n,n) for n in (labels_sorted if ('attach_only_names' not in globals() or not all((n in attach_only_names) for n in labels_sorted)) else [])]),
             showarrow=False,
-            xanchor="right", yanchor=\"middle\",
+            xanchor="right", yanchor="middle",
             yshift=0,
             align="right",
             font=dict(size=10, color="#FFFFFF"),
@@ -612,7 +612,7 @@ def render_key_levels(
     fig.add_annotation(
         x=0, xref="paper", y=1.12, yref="paper",
         text=str(ticker),
-        showarrow=False, xanchor="left", yanchor=\"middle\",
+        showarrow=False, xanchor="left", yanchor="middle",
         font=dict(size=12, color="#FFFFFF"),
     )
 
@@ -620,7 +620,7 @@ def render_key_levels(
     fig.add_annotation(
         x=0.5, xref="paper", y=-0.08, yref="paper",
         text=_format_date_for_footer(pd.to_datetime(x_left)),
-        showarrow=False, xanchor="center", yanchor=\"middle\",
+        showarrow=False, xanchor="center", yanchor="middle",
         font=dict(size=10, color="#FFFFFF"),
     )
 
@@ -642,7 +642,7 @@ def render_key_levels(
 
     fig.add_annotation(
         xref='paper', yref='paper',
-        x=0.0, y=1.0, xanchor='left', yanchor=\"middle\",
+        x=0.0, y=1.0, xanchor='left', yanchor="middle",
         text=str(ticker), showarrow=False,
         font=dict(size=14)
     )
