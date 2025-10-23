@@ -783,15 +783,18 @@ def compute_heat_scores(df_final:_pd.DataFrame, gflip=None, ticker_hint=None, rv
     })
     return out.sort_values("K").reset_index(drop=True)
 
+
 def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=None, spot=None):
     """
     Smooth heatmap along strikes with blurred transitions between levels.
-    Only this function is modified. Other code untouched.
+    Touch only this function. Other code remains unchanged.
     """
     try:
-        rv_z = 0.0  # placeholder
+        import numpy as np
+        rv_z = 0.0  # placeholder until RV is provided
+        
         scores = compute_heat_scores(df_final, gflip=gflip, rv_z=rv_z)
-        if scores.empty:
+        if scores is None or scores.empty:
             st.info("Нет данных для heatmap.")
             return
 
@@ -799,28 +802,39 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
         K = _pd.to_numeric(scores["K"], errors="coerce").astype(float).to_numpy()
         H = _pd.to_numeric(scores["H"], errors="coerce").astype(float).to_numpy()
 
-        # Sort by strike
+        # Sort by strike to avoid zigzag
         order = np.argsort(K)
         K = K[order]; H = H[order]
 
-        # Upsample + gaussian blur along K to mimic soft boundaries
-        def _smooth_along_strike(K, H, up=8, sigma=0.6):
-            if len(K) < 2:
-                return K, H
-            K_fine = np.linspace(K.min(), K.max(), (len(K)-1)*up + 1)
-            H_lin = np.interp(K_fine, K, H)
+        # --- Build blurred field along strikes ---
+        UP = 32           # upsample density along strikes
+        SIGMA_STR = 1.8   # gaussian blur width in strikes (tune 1.5..2.5)
+        BOX_W = 11        # extra box smoothing window (odd)
 
-            # Gaussian kernel in index domain
-            half = int(max(1, round(3*sigma*up)))
-            idx = np.arange(-half, half+1)
-            ker = np.exp(-0.5*(idx/(sigma*up))**2)
-            ker = ker / ker.sum()
-            H_blur = np.convolve(H_lin, ker, mode="same")
-            return K_fine, H_blur
+        # Upsample
+        if len(K) >= 2:
+            K_fine = np.linspace(K.min(), K.max(), (len(K)-1)*UP + 1)
+            H_lin  = np.interp(K_fine, K, H)
+        else:
+            K_fine = K.copy()
+            H_lin  = H.copy()
 
-        K_fine, H_fine = _smooth_along_strike(K, H, up=12, sigma=0.6)
+        # Gaussian blur in index domain
+        half = int(max(3, round(3 * SIGMA_STR * UP)))
+        idx  = np.arange(-half, half + 1, dtype=float)
+        ker  = np.exp(-0.5 * (idx / (SIGMA_STR * UP))**2)
+        ker /= ker.sum()
+        H_blur = np.convolve(H_lin, ker, mode="same")
 
-        # Time axis
+        # Extra mild box smoothing to remove residual banding
+        W = max(3, BOX_W | 1)  # ensure odd
+        pad = W // 2
+        H_pad = np.pad(H_blur, (pad, pad), mode="edge")
+        csum = np.cumsum(H_pad, dtype=float)
+        H_box = (csum[W:] - csum[:-W]) / W
+        K_plot = K_fine  # y-axis
+
+        # Time axis and optional price overlay
         x_vals = None; price_vals = None
         if price_df is not None and len(price_df) > 0:
             pdf = price_df.copy()
@@ -838,24 +852,30 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
         if x_vals is None:
             x_vals = np.arange(128)
 
-        Z = np.tile(H_fine.reshape(-1,1), (1, len(x_vals)))
+        # Heat matrix
+        Z = np.tile(H_box.reshape(-1, 1), (1, len(x_vals)))
 
+        # Figure
         fig = go.Figure()
         fig.add_trace(go.Heatmap(
-            x=x_vals, y=K_fine, z=Z,
+            x=x_vals, y=K_plot, z=Z,
             zmin=0, zmax=1,
             colorscale="Viridis",
             zsmooth="best",
-            colorbar=dict(title="Level strength")
+            showscale=True,
+            colorbar=dict(title="Level Strength")
         ))
 
+        # Price overlay
         if price_vals is not None:
-            fig.add_trace(go.Scatter(x=x_vals, y=price_vals, mode="lines", name="Price", line=dict(width=1)))
+            fig.add_trace(go.Scatter(
+                x=x_vals, y=price_vals, mode="lines",
+                name="Price", line=dict(width=1)
+            ))
 
-        fig.update_layout(title="Level Strength Heatmap", height=800, template="plotly_white")
+        # Axes and G-Flip
         fig.update_xaxes(title="Time")
         fig.update_yaxes(title="Price")
-
         if gflip is None:
             try:
                 gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
@@ -869,31 +889,4 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
         import traceback
         st.error(f"Heatmap exception: {type(e).__name__}: {e}")
         st.code(traceback.format_exc())
-    try:
-        rv_z = 0.0  # TODO: populate if доступно
-        scores = compute_heat_scores(df_final, gflip=gflip, rv_z=rv_z)
-        if scores.empty:
-            st.info("Нет данных для heatmap.")
-            return
-        K = scores["K"].to_numpy()
-        H = scores["H"].to_numpy()
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=H, y=K, orientation="h",
-            marker=dict(color=H, colorscale="Turbo"),
-            showlegend=False, name="Heat"
-        ))
-        fig.update_yaxes(title="Strike K")
-        fig.update_xaxes(title="Heat", range=[0,1])
-        if gflip is None:
-            try:
-                gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
-            except Exception:
-                gflip = None
-        if gflip is not None:
-            fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
-        st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "scrollZoom": False})
-    except Exception as e:
-        import traceback
-        st.error(f"Heatmap exception: {type(e).__name__}: {e}")
-        st.code(traceback.format_exc())
+
