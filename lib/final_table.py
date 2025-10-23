@@ -257,6 +257,39 @@ def build_final_tables_from_corr(
         put_vol_map  = {float(k): float(v) for k, v in pv.get("P", pd.Series(dtype=float)).items()}
         net_tbl["call_vol"] = net_tbl["K"].map(call_vol_map).fillna(0.0)
         net_tbl["put_vol"]  = net_tbl["K"].map(put_vol_map).fillna(0.0)
+        # --- Power Zone for single expiry ---
+        try:
+            # Build series context for this expiry
+            try:
+                series_map = _series_ctx_from_corr(df_corr, exp)
+            except Exception:
+                series_map = {}
+            strikes_eval = net_tbl["K"].astype(float).tolist()
+            # Choose S: prefer s_override if finite, else median of net_tbl['S']
+            try:
+                import numpy as _np, pandas as _pd
+                _S = float(s_override) if (s_override is not None and _np.isfinite(float(s_override))) else (
+                    float(_np.nanmedian(_pd.to_numeric(net_tbl["S"], errors="coerce"))) if ("S" in net_tbl.columns and net_tbl["S"].notna().any()) else float("nan")
+                )
+            except Exception:
+                _S = float("nan")
+            _all_ctx = []
+            if isinstance(series_map, dict) and exp in series_map:
+                _all_ctx.append(dict(series_map[exp]))
+            pz_vals = compute_power_zone(
+                S=_S,
+                strikes_eval=strikes_eval,
+                all_series_ctx=_all_ctx,
+                day_high=getattr(cfg, "day_high", None),
+                day_low=getattr(cfg, "day_low", None),
+            )
+            net_tbl["PZ"] = _pd.Series(pz_vals, index=net_tbl.index).astype(float)
+        except Exception:
+            # Keep pipeline robust if PZ fails
+            import numpy as _np
+            net_tbl["PZ"] = _np.nan
+
+
 
         # Упорядочим колонки
         cols = ["exp","K","S"] + \
