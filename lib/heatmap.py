@@ -812,7 +812,7 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
         if gflip is not None:
             fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
         fig.update_layout(showlegend=False)
-st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "staticPlot": True})
+        st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "staticPlot": True})
     except Exception as e:
         import traceback
         st.error(f"Heatmap exception: {type(e).__name__}: {e}")
