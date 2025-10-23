@@ -102,12 +102,6 @@ COLOR_VWAP        = "#E4A339"  # оранжевая VWAP
 BACKGROUND        = "#0E1117"
 AXIS_GRAY         = "#AAAAAA"
 GRID_COLOR        = "rgba(255,255,255,0.05)"
-
-def _to_float_series(df: pd.DataFrame, col: str) -> pd.Series:
-    if df is None or col not in df.columns:
-        return pd.Series(dtype=float)
-    return pd.to_numeric(df[col], errors="coerce")
-
 def _group_max_level(df: pd.DataFrame, value_col: str) -> Optional[float]:
     if df is None or df.empty or "K" not in df.columns or value_col not in df.columns:
         return None
