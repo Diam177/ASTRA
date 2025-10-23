@@ -785,66 +785,77 @@ def compute_heat_scores(df_final:_pd.DataFrame, gflip=None, ticker_hint=None, rv
 
 def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=None, spot=None):
     """
-    Render heatmap with smooth vertical transitions using go.Heatmap.
-    Only this function is modified. Other code remains untouched.
+    Smooth heatmap along strikes with blurred transitions between levels.
+    Only this function is modified. Other code untouched.
     """
     try:
-        rv_z = 0.0  # placeholder until RV is provided in attrs
+        rv_z = 0.0  # placeholder
         scores = compute_heat_scores(df_final, gflip=gflip, rv_z=rv_z)
         if scores.empty:
             st.info("Нет данных для heatmap.")
             return
 
-        # y-axis: strikes
-        K = scores["K"].to_numpy()
-        H = scores["H"].to_numpy()
+        # Base vectors
+        K = _pd.to_numeric(scores["K"], errors="coerce").astype(float).to_numpy()
+        H = _pd.to_numeric(scores["H"], errors="coerce").astype(float).to_numpy()
 
-        # x-axis: time
-        # Try to extract time and price from price_df if provided
-        time_vals = None
-        price_vals = None
+        # Sort by strike
+        order = np.argsort(K)
+        K = K[order]; H = H[order]
+
+        # Upsample + gaussian blur along K to mimic soft boundaries
+        def _smooth_along_strike(K, H, up=8, sigma=0.6):
+            if len(K) < 2:
+                return K, H
+            K_fine = np.linspace(K.min(), K.max(), (len(K)-1)*up + 1)
+            H_lin = np.interp(K_fine, K, H)
+
+            # Gaussian kernel in index domain
+            half = int(max(1, round(3*sigma*up)))
+            idx = np.arange(-half, half+1)
+            ker = np.exp(-0.5*(idx/(sigma*up))**2)
+            ker = ker / ker.sum()
+            H_blur = np.convolve(H_lin, ker, mode="same")
+            return K_fine, H_blur
+
+        K_fine, H_fine = _smooth_along_strike(K, H, up=12, sigma=0.6)
+
+        # Time axis
+        x_vals = None; price_vals = None
         if price_df is not None and len(price_df) > 0:
-            # Accept common column names
-            for tc in (("time","price"), ("t","c"), ("datetime","close")):
-                if tc[0] in price_df.columns and tc[1] in price_df.columns:
-                    time_vals = price_df[tc[0]].to_numpy()
-                    price_vals = _pd.to_numeric(price_df[tc[1]], errors="coerce").astype(float).to_numpy()
-                    break
-        # Fallback synthetic time axis
-        if time_vals is None:
-            import numpy as np
-            n_time = 128
-            time_vals = np.arange(n_time)
-            price_vals = None
+            pdf = price_df.copy()
+            pdf.columns = [str(c).lower() for c in pdf.columns]
+            if "time" in pdf.columns:
+                x_vals = _pd.to_datetime(pdf["time"], errors="coerce")
+            elif "timestamp" in pdf.columns:
+                x_vals = _pd.to_datetime(pdf["timestamp"], unit="ms", errors="coerce")
+            elif "t" in pdf.columns:
+                x_vals = _pd.to_datetime(pdf["t"], unit="ms", errors="coerce")
+            if "price" in pdf.columns:
+                price_vals = _pd.to_numeric(pdf["price"], errors="coerce").astype(float)
+            elif "close" in pdf.columns:
+                price_vals = _pd.to_numeric(pdf["close"], errors="coerce").astype(float)
+        if x_vals is None:
+            x_vals = np.arange(128)
 
-        # Build Z matrix by repeating heat score across time
-        import numpy as np
-        Z = np.repeat(H[:, None], len(time_vals), axis=1)
+        Z = np.tile(H_fine.reshape(-1,1), (1, len(x_vals)))
 
-        # Figure
         fig = go.Figure()
         fig.add_trace(go.Heatmap(
-            x=time_vals, y=K, z=Z,
+            x=x_vals, y=K_fine, z=Z,
             zmin=0, zmax=1,
-            colorscale="Turbo",
+            colorscale="Viridis",
             zsmooth="best",
-            colorbar=dict(title="Level Strength")
+            colorbar=dict(title="Level strength")
         ))
 
-        # Optional price overlay if we have price series
         if price_vals is not None:
-            fig.add_trace(go.Scatter(
-                x=time_vals, y=price_vals,
-                mode="lines",
-                name="Price",
-                line=dict(width=1)
-            ))
+            fig.add_trace(go.Scatter(x=x_vals, y=price_vals, mode="lines", name="Price", line=dict(width=1)))
 
-        # Axes
-        fig.update_yaxes(title="Price")
+        fig.update_layout(title="Level Strength Heatmap", height=800, template="plotly_white")
         fig.update_xaxes(title="Time")
+        fig.update_yaxes(title="Price")
 
-        # Optional G-Flip horizontal line
         if gflip is None:
             try:
                 gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
@@ -853,6 +864,34 @@ def _render_level_strength_heatmap(df_final:_pd.DataFrame, price_df=None, gflip=
         if gflip is not None:
             fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
 
+        st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "scrollZoom": False})
+    except Exception as e:
+        import traceback
+        st.error(f"Heatmap exception: {type(e).__name__}: {e}")
+        st.code(traceback.format_exc())
+    try:
+        rv_z = 0.0  # TODO: populate if доступно
+        scores = compute_heat_scores(df_final, gflip=gflip, rv_z=rv_z)
+        if scores.empty:
+            st.info("Нет данных для heatmap.")
+            return
+        K = scores["K"].to_numpy()
+        H = scores["H"].to_numpy()
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=H, y=K, orientation="h",
+            marker=dict(color=H, colorscale="Turbo"),
+            showlegend=False, name="Heat"
+        ))
+        fig.update_yaxes(title="Strike K")
+        fig.update_xaxes(title="Heat", range=[0,1])
+        if gflip is None:
+            try:
+                gflip = (getattr(df_final, "attrs", {}).get("gflip", {}) or {}).get("cross", None)
+            except Exception:
+                gflip = None
+        if gflip is not None:
+            fig.add_hline(y=float(gflip), line=dict(color="#E4A339", width=1, dash="dot"))
         st.plotly_chart(fig, use_container_width=True, theme=None, config={"displayModeBar": False, "scrollZoom": False})
     except Exception as e:
         import traceback
