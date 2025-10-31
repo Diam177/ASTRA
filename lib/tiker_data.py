@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List, Tuple
 import requests
 
 
-POLYGON_BASE = "https://api.polygon.io"
+POLYGON_BASE = "https://api.massive.com"
 HEADERS_TEMPLATE = {"Authorization": "Bearer {api_key}"}
 
 
